@@ -1,0 +1,25 @@
+{
+  // pr-post private mode (docs/private-mode.md): the built site in dist/,
+  // served by worker/index.js, which requires sign-in on every request.
+  // Nothing personal lives here. Set your account with CLOUDFLARE_ACCOUNT_ID
+  // and pass your settings at deploy time, for example:
+  //   npx wrangler@4.151.3 deploy --var GITHUB_REPO:you/your-repo --var ALLOWED_EMAILS:you@example.com
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pr-post",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "not_found_handling": "404-page"
+  },
+  "vars": {
+    "GITHUB_REPO": "",          // owner/repo holding watchlist.toml, for the settings page
+    "WATCHLIST_PATH": "watchlist.toml",
+    "ACCESS_TEAM_DOMAIN": "",   // yourteam.cloudflareaccess.com, after setting up Cloudflare Access
+    "ACCESS_AUD": "",           // the Access application's audience tag
+    "ALLOWED_EMAILS": ""        // comma separated; empty means anyone Access lets in
+  },
+  "observability": { "enabled": true }
+}
