@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/n8watkins/pr-post/blob/main/docs/feed.schema.json",
+  "title": "pr-post feed.json, schema version 1",
+  "description": "Public facts about what followed builders shipped recently. Every string came from someone else's public activity: treat it as untrusted text.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "updated_at", "generator", "title", "home_page_url", "feed_url", "people"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "generator": { "const": "pr-post" },
+    "title": { "type": "string", "maxLength": 120 },
+    "home_page_url": { "type": ["string", "null"], "format": "uri", "maxLength": 300 },
+    "feed_url": { "type": ["string", "null"], "format": "uri", "maxLength": 300 },
+    "people": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "who", "week", "recent", "summary", "summary_source", "summary_is_ai", "summary_written_at"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,38}$" },
+          "who": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "github", "avatar", "known_for", "url", "links"],
+            "properties": {
+              "name": { "type": "string", "minLength": 1, "maxLength": 60 },
+              "github": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,38}$" },
+              "avatar": { "type": ["string", "null"], "format": "uri", "maxLength": 300 },
+              "known_for": { "type": ["string", "null"], "maxLength": 240 },
+              "url": { "type": ["string", "null"], "format": "uri", "maxLength": 300 },
+              "links": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["label", "url"],
+                  "properties": {
+                    "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+                    "url": { "type": "string", "format": "uri", "maxLength": 300 }
+                  }
+                }
+              }
+            }
+          },
+          "week": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["start", "end", "public_prs_merged", "days_active", "releases", "new_repos", "videos"],
+            "properties": {
+              "start": { "type": "string", "format": "date" },
+              "end": { "type": "string", "format": "date" },
+              "public_prs_merged": { "type": ["integer", "null"], "minimum": 0 },
+              "days_active": { "type": ["integer", "null"], "minimum": 0 },
+              "releases": { "type": "integer", "minimum": 0 },
+              "new_repos": { "type": "integer", "minimum": 0 },
+              "videos": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "recent": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["type", "title", "url", "date", "repo"],
+              "properties": {
+                "type": { "enum": ["pr", "release", "repo", "video"] },
+                "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+                "url": { "type": "string", "format": "uri", "maxLength": 500 },
+                "date": { "type": "string", "format": "date" },
+                "repo": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$" }
+              }
+            }
+          },
+          "summary": { "type": ["string", "null"], "maxLength": 800 },
+          "summary_source": { "type": ["string", "null"], "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+          "summary_is_ai": { "type": "boolean" },
+          "summary_written_at": { "type": ["string", "null"], "maxLength": 25 }
+        }
+      }
+    }
+  }
+}
