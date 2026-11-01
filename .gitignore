@@ -1,0 +1,9 @@
+__pycache__/
+dist/
+.env
+.env.*
+.wrangler/
+node_modules/
+# Collected data and stats are rebuilt on every run and never committed for the demo.
+demo/data/
+demo/stats/
