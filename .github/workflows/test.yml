@@ -1,0 +1,42 @@
+# Tests on every push and pull request: Python and Worker tests, then a full
+# offline build of a synthetic paper whose feed must pass the same check the
+# demo deploy uses.
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Python tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Worker tests
+        run: node --test tests/*.test.mjs
+      - name: Build and check the synthetic paper
+        run: |
+          python3 tests/fixture_paper.py "$RUNNER_TEMP/paper"
+          python3 scripts/stats.py --paper "$RUNNER_TEMP/paper"
+          python3 scripts/build_site.py --paper "$RUNNER_TEMP/paper" --out "$RUNNER_TEMP/dist"
+          python3 scripts/feed.py --check "$RUNNER_TEMP/dist/feed.json"
+      - name: No em dashes
+        run: |
+          if git grep -nP '\x{2014}' -- .; then
+            echo "::error::Use a plain hyphen instead of the em dash."
+            exit 1
+          fi

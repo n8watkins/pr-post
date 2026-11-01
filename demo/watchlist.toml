@@ -1,0 +1,64 @@
+# The live demo at https://n8watkins.github.io/pr-post/
+# The Pages workflow collects this paper twice a week and publishes it.
+# Copy this file to start your own paper; every setting is optional.
+
+[site]
+title = "The Pull Request Post"
+motto = "All the commits fit to print"
+mode = "public"          # anyone can read it; private counts are never printed
+desk = "the facts desk"
+# url and base_path are filled in by the Pages workflow.
+
+[writer]
+kind = "none"            # facts only; see docs/writers.md to add written reports
+reader = "someone curious about these builders, technical but not inside their projects"
+
+# People to follow. Add a [[people]] block per person.
+#
+# github:             their GitHub username (optional if they have a YouTube channel).
+# id:                 the page address, /p/<id>/. Defaults to the GitHub username;
+#                     required for people without one.
+# name:               what you call them.
+# orgs:               GitHub organizations where their real work lands.
+# youtube_channel_id: the UC... id of their channel, for recent videos (no key needed).
+# known_for:          a one-line reminder of who they are.
+# ticker:             their symbol on the paper's Commit Index.
+# starred:            true to keep them at the top of the sidebar and the front page.
+# links:              socials that are not on their GitHub profile.
+
+[[people]]
+github = "kunchenguid"
+name = "Kun Chen"
+ticker = "KUN"
+starred = true
+youtube_channel_id = "UCb69t9ZkE5z1KvCmfJoaifA"
+known_for = "former principal engineer at Meta, Microsoft and Atlassian; builds agent tools like no-mistakes, gnhf and the AXI agent interfaces"
+links = [
+  { label = "YouTube", url = "https://www.youtube.com/channel/UCb69t9ZkE5z1KvCmfJoaifA" },
+  { label = "X", url = "https://x.com/kunchenguid" },
+  { label = "Substack", url = "https://kunchenguid.substack.com" },
+  { label = "Discord", url = "https://discord.gg/Wsy2NpnZDu" },
+]
+
+[[people]]
+github = "moomooskycow"
+name = "Phaedrus"
+ticker = "PHDR"
+orgs = ["misty-step"]
+known_for = "runs Misty Step, an AI-native software agency, and builds tooling for fleets of coding agents"
+links = [
+  { label = "X", url = "https://x.com/moomooskycow" },
+  { label = "Misty Step", url = "https://www.mistystep.io/" },
+]
+
+[[people]]
+id = "nateherk"
+name = "Nate Herk"
+ticker = "HERK"
+youtube_channel_id = "UC2ojq-nuP8ceeHqiroeKhBA"
+known_for = "teaches AI automation on YouTube and runs the AI Automation Society community"
+links = [
+  { label = "X", url = "https://x.com/nateherk" },
+  { label = "nateherk.com", url = "https://nateherk.com" },
+  { label = "AI Automation Society", url = "https://www.skool.com/ai-automation-society/about" },
+]

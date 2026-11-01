@@ -1,0 +1,83 @@
+# Collects the demo paper, builds the public site and feed.json, and publishes
+# them to GitHub Pages. Nothing is committed back: data lives in the Actions
+# cache between runs (for week-over-week arrows and archive detection) and the
+# published site is the only output.
+#
+# To publish your own paper instead, set the repository variable PR_POST_PAPER
+# to the folder holding your watchlist.toml (default: demo).
+name: Demo site
+
+on:
+  schedule:
+    - cron: "0 11 * * 3,6" # Wednesday and Saturday; scheduled runs can start late
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["demo/**", "scripts/**", "site/**", "docs/feed.schema.json", ".github/workflows/demo.yml"]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  PR_POST_PAPER: ${{ vars.PR_POST_PAPER || 'demo' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - id: pages
+        uses: actions/configure-pages@v5
+      - name: Restore earlier data
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.PR_POST_PAPER }}/data
+            ${{ env.PR_POST_PAPER }}/stats
+          key: paper-${{ env.PR_POST_PAPER }}-${{ github.run_id }}
+          restore-keys: paper-${{ env.PR_POST_PAPER }}-
+      - name: Collect
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 scripts/collect.py
+          python3 scripts/stats.py
+          # Keep about three weeks of snapshots.
+          ls -1 "$PR_POST_PAPER"/stats/*.json | sort | head -n -12 | xargs -r rm
+      - name: Save data for the next run
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.PR_POST_PAPER }}/data
+            ${{ env.PR_POST_PAPER }}/stats
+          key: paper-${{ env.PR_POST_PAPER }}-${{ github.run_id }}
+      - name: Build
+        env:
+          PR_POST_SITE_URL: ${{ steps.pages.outputs.base_url }}
+          PR_POST_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: python3 scripts/build_site.py --out _site
+      - name: Check the feed (fails if it is empty or invalid)
+        run: python3 scripts/feed.py --check _site/feed.json
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
