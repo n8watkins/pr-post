@@ -4,13 +4,16 @@
 Usage:
     python3 scripts/send_email.py [--paper DIR] <paper>/reports/<id>/<date>-<kind>.md [more.md ...]
     python3 scripts/send_email.py [--paper DIR] <report.md> ... --preview out.html   # render only
+    python3 scripts/send_email.py [--paper DIR] <report.md> ... --dry-run            # every check, no send
 
 Several reports become one digest email with an "In this issue" summary.
 
 Needs RESEND_API_KEY to send. Recipient and sender come from [email] in
 watchlist.toml, and sending must be turned on with email = true under
 [delivery]. Exits 0 with a message when email is turned off or no key is
-configured, so a run without email still succeeds.
+configured, so a run without email still succeeds. --dry-run runs every check
+a real send would (email on, a recipient, a key) and prints the subject, but
+never contacts Resend; add --preview to keep the rendered HTML too.
 
 Email clients ignore most CSS, so the layout is tables with inline styles, and
 the Markdown is converted here (the subset reports use) to avoid dependencies.
@@ -207,12 +210,34 @@ def render(reports, kind, links, brand="PR Post"):
 
 # ---------- sending ----------
 
+def repo_path(path):
+    """A file's path inside the git repository that holds it, for a link to it on GitHub, or None.
+
+    The engine and the paper may live in different repositories, so this
+    looks for the repository around the report, not around this script.
+    """
+    path = Path(path).resolve()
+    for parent in path.parents:
+        if (parent / ".git").exists():
+            return path.relative_to(parent).as_posix()
+    return None
+
+
+def subject_for(reports, kind):
+    titles = [next((l[2:].strip() for l in md.splitlines() if l.startswith("# ")), fb) for md, fb in reports]
+    label = KINDS[kind][0].title()
+    if len(titles) == 1:
+        return f"{label}: {titles[0]}"
+    return f"{label}: {len(titles)} people, {split_title(titles[0])[1]}"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--paper", help="folder holding watchlist.toml (default: $PR_POST_PAPER or the repo root)")
     ap.add_argument("reports", nargs="+", help="one email for all of them, in watchlist order")
     ap.add_argument("--subject", help="default: built from the report titles")
     ap.add_argument("--preview", metavar="FILE", help="write the HTML here instead of sending")
+    ap.add_argument("--dry-run", action="store_true", help="run every check a real send would, print the subject, but never send")
     args = ap.parse_args()
 
     paper = config.paper_dir(args.paper)
@@ -230,14 +255,8 @@ def main():
     reports = [(p.read_text(), p.stem) for p in paths]
 
     repo = link_cfg.get("repo")
-    if len(paths) == 1:
-        try:
-            rel = paths[0].resolve().relative_to(config.ROOT).as_posix()
-        except ValueError:
-            rel = None
-        github = f"{repo}/blob/main/{rel}" if repo and rel else repo
-    else:
-        github = repo
+    rel = repo_path(paths[0]) if len(paths) == 1 else None
+    github = f"{repo}/blob/main/{rel}" if repo and rel else repo
     links = [
         ("Read on GitHub", github),
         ("Read the paper", watch["site"]["url"] or None),
@@ -247,7 +266,8 @@ def main():
     if args.preview:
         Path(args.preview).write_text(page)
         print("Wrote", args.preview)
-        return
+        if not args.dry_run:
+            return
 
     if not watch["delivery"].get("email"):
         print("Email is turned off in watchlist.toml; skipping.")
@@ -255,20 +275,20 @@ def main():
     if not cfg.get("to"):
         sys.exit("Set [email] to in watchlist.toml before turning email on.")
     key = os.environ.get("RESEND_API_KEY")
-    if not key:
+    if not key and not args.dry_run:
         print("RESEND_API_KEY not set; skipping email.")
         return
 
-    titles = [next((l[2:].strip() for l in md.splitlines() if l.startswith("# ")), fb) for md, fb in reports]
-    label = KINDS[kind][0].title()
-    if len(titles) == 1:
-        subject = f"{label}: {titles[0]}"
-    else:
-        subject = f"{label}: {len(titles)} people, {split_title(titles[0])[1]}"
+    subject = args.subject or subject_for(reports, kind)
+    if args.dry_run:
+        # Never print the recipient or the key: dry runs show up in public Actions logs.
+        print(f"Dry run: would send {len(reports)} report(s) as one email, subject {subject!r},"
+              f" from {cfg['from']!r}; RESEND_API_KEY is {'set' if key else 'not set'}. Nothing was sent.")
+        return
     payload = {
         "from": cfg["from"],
         "to": [cfg["to"]],
-        "subject": args.subject or subject,
+        "subject": subject,
         "html": page,
         "text": "\n\n---\n\n".join(md for md, _ in reports),
     }

@@ -27,8 +27,11 @@ A private site also tells search engines not to index it.
    npx wrangler@4.151.3 deploy \
      --var GITHUB_REPO:<you>/<your repo> \
      --var WATCHLIST_PATH:<your paper>/watchlist.toml \
-     --var ALLOWED_EMAILS:you@example.com,friend@example.com
+     --var ALLOWED_EMAILS:you@example.com,friend@example.com \
+     --var "SITE_TITLE:The Pull Request Post"
    ```
+
+   `SITE_TITLE` is only the name the browser's password prompt shows; it defaults to `pr-post`.
 
 3. Choose how readers sign in.
    - **Cloudflare Access (recommended).**
@@ -44,6 +47,60 @@ A private site also tells search engines not to index it.
 4. Optional: let the settings page save.
    Create a fine-grained GitHub token with **Contents: Read and write** on your repository only, then `npx wrangler secret put GITHUB_TOKEN`.
    The settings page then commits your watch list after validating every field.
+
+## A paper in its own private repository
+
+A private paper usually holds things that should not sit in a public fork: the people you follow, written reports, your email address.
+Keep those in a private repository of their own and run this engine from it, pinned to a release, so there is one copy of the code and upgrades are a one-line change.
+
+The private repository holds only the paper and its deployment settings:
+
+```text
+watchlist.toml          [site] mode = "private", the people you follow
+data/ stats/            committed by your collect workflow, so a writer can read them
+reports/ profiles/ editions/ summaries/   written material, if you have a writer
+wrangler.jsonc          your Worker; "main" points into the engine checkout
+.github/actions/engine/action.yml        checks out pr-post at one pinned ref
+.github/workflows/      collect, check, deploy and email, all running the engine
+```
+
+Pin the engine in one place, a small composite action that every workflow uses:
+
+```yaml
+# .github/actions/engine/action.yml
+name: pr-post engine
+description: Check out pr-post at the pinned ref into engine/ and set up Python.
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: n8watkins/pr-post
+        ref: <a commit SHA>   # the release you want; bump it to upgrade
+        path: engine
+        persist-credentials: false
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+```
+
+Then run the engine against the repository root, which is the paper:
+
+```yaml
+steps:
+  - uses: actions/checkout@v4
+  - uses: ./.github/actions/engine
+  - run: python3 engine/scripts/collect.py --paper .
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  - run: python3 engine/scripts/stats.py --paper .
+  - run: python3 engine/scripts/build_site.py --paper . --out dist
+  - run: python3 engine/scripts/feed.py --check dist/feed.json
+```
+
+In `wrangler.jsonc` set `"main": "engine/worker/index.js"` and keep `"assets": { "directory": "./dist" }`, add `engine/` to `.gitignore`, and pass the repository at deploy time with `--var GITHUB_REPO:${{ github.repository }}` so nothing depends on the repository's name.
+`send_email.py` links each report to the repository that holds it, so set `[links] repo` to your private repository's address.
+To test the email without sending it, run `send_email.py --dry-run --preview digest.html`: it runs every check a real send would and writes the HTML, but never contacts Resend.
 
 ## Secrets
 

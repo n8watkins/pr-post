@@ -130,7 +130,8 @@ def person_stats(d, person):
             capped.append(item)
 
     own_links = list(person["links"])
-    if person["youtube_channel_id"]:
+    # Add the channel link unless they already list a YouTube link (often a nicer @handle address).
+    if person["youtube_channel_id"] and not any(l["label"].lower() == "youtube" for l in own_links):
         own_links.append({"label": "YouTube", "url": f"https://www.youtube.com/channel/{person['youtube_channel_id']}"})
     out = {
         "id": person["id"],

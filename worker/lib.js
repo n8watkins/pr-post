@@ -139,3 +139,8 @@ export function checkClaims(payload, { aud, teamDomain, now = Date.now() / 1000 
   if (typeof payload.nbf === "number" && payload.nbf > now + 60) return "not yet valid";
   return null;
 }
+
+/** The name the browser's sign-in prompt shows: SITE_TITLE without characters that would break the header. */
+export function realm(env) {
+  return String(env.SITE_TITLE || "pr-post").replace(/["\\\r\n]/g, "").slice(0, 80) || "pr-post";
+}

@@ -17,6 +17,7 @@
   "vars": {
     "GITHUB_REPO": "",          // owner/repo holding watchlist.toml, for the settings page
     "WATCHLIST_PATH": "watchlist.toml",
+    "SITE_TITLE": "pr-post",    // the name the password prompt shows
     "ACCESS_TEAM_DOMAIN": "",   // yourteam.cloudflareaccess.com, after setting up Cloudflare Access
     "ACCESS_AUD": "",           // the Access application's audience tag
     "ALLOWED_EMAILS": ""        // comma separated; empty means anyone Access lets in

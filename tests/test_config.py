@@ -66,6 +66,24 @@ class People(unittest.TestCase):
                 config.parse(text)
 
 
+class YouTubeLinks(unittest.TestCase):
+    def links_for(self, toml):
+        import stats
+        person = config.parse(toml)["people"][0]
+        data = {"id": person["id"], "collected_at": "2026-10-31T12:00:00+00:00", "github": None,
+                "youtube": {"channel_id": "x", "channel_url": "u", "channel_title": "t", "videos": []}}
+        return stats.person_stats(data, person)["links"]
+
+    def test_channel_link_is_added(self):
+        links = self.links_for('[[people]]\nid = "t"\nyoutube_channel_id = "UCaaaaaaaaaaaaaaaaaaaaaa"')
+        self.assertEqual(links, [{"label": "YouTube", "url": "https://www.youtube.com/channel/UCaaaaaaaaaaaaaaaaaaaaaa"}])
+
+    def test_a_listed_youtube_link_wins(self):
+        links = self.links_for('[[people]]\nid = "t"\nyoutube_channel_id = "UCaaaaaaaaaaaaaaaaaaaaaa"\n'
+                               'links = [{ label = "YouTube", url = "https://www.youtube.com/@t" }]')
+        self.assertEqual(links, [{"label": "YouTube", "url": "https://www.youtube.com/@t"}])
+
+
 class Environment(unittest.TestCase):
     def test_workflow_overrides_url_and_base_path(self):
         with tempfile.TemporaryDirectory() as d:

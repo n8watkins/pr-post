@@ -106,4 +106,8 @@ Set `[email] to` and `from`, set `email = true` under `[delivery]`, and run it w
 ```sh
 python3 scripts/send_email.py --paper paper paper/reports/<id>/<date>-weekly.md
 python3 scripts/send_email.py --paper paper <report.md> --preview out.html   # render only
+python3 scripts/send_email.py --paper paper <report.md> --dry-run            # every check, nothing sent
 ```
+
+`--dry-run` checks that email is on, that `[email] to` is set and whether `RESEND_API_KEY` is present, prints the subject, and stops before contacting Resend; combine it with `--preview` to keep the HTML.
+It never prints the recipient or the key.
