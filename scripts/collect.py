@@ -14,8 +14,10 @@ Sources:
              No key.
 
 A source that fails is recorded under "errors" in that person's file so one
-flaky feed does not sink the whole run; feed.py --check fails the build if
-the result has nothing in it at all. No dependencies.
+flaky feed does not sink the whole run. A YouTube feed that fails keeps the
+videos from the previous run (stats.py still drops any older than the week),
+so a flaky feed never blanks someone's page. feed.py --check fails the build
+if the result has nothing in it at all. No dependencies.
 """
 
 import argparse
@@ -309,7 +311,13 @@ def collect_github(user, orgs, since, previous=None):
 
 
 def collect_person(person, since, previous=None):
-    """One person's data file: GitHub and YouTube blocks, either of which may be null."""
+    """One person's data file: GitHub and YouTube blocks, either of which may be null.
+
+    `previous` is this person's data file from the last run, if any: it carries
+    repository states forward (to spot archiving) and stands in for a YouTube
+    feed that fails this time.
+    """
+    previous = previous or {}
     out = {
         "id": person["id"],
         "since": since.isoformat(),
@@ -319,13 +327,17 @@ def collect_person(person, since, previous=None):
         "errors": [],
     }
     if person["github"]:
-        out["github"] = collect_github(person["github"], person["orgs"], since, (previous or {}).get("repo_states"))
+        out["github"] = collect_github(person["github"], person["orgs"], since, (previous.get("github") or {}).get("repo_states"))
     if person["youtube_channel_id"]:
         try:
             out["youtube"] = youtube.collect(person["youtube_channel_id"], since)
         except youtube.FeedError as e:
             out["errors"].append({"source": "youtube", "message": str(e)})
-            print(f"::warning::YouTube feed for {person['id']} failed: {e}", file=sys.stderr)
+            last = previous.get("youtube")
+            if last and last.get("channel_id") == person["youtube_channel_id"]:
+                out["youtube"] = {**last, "carried_over_from": last.get("carried_over_from") or previous.get("collected_at")}
+            kept = " (kept the previous run's videos)" if out["youtube"] else ""
+            print(f"::warning::YouTube feed for {person['id']} failed: {e}{kept}", file=sys.stderr)
     return out
 
 
@@ -360,9 +372,7 @@ def main():
     (paper / "data").mkdir(exist_ok=True)
     for person in cfg["people"]:
         out = paper / "data" / f"{person['id']}.json"
-        previous = None
-        if out.exists():
-            previous = (json.loads(out.read_text()).get("github") or {})
+        previous = json.loads(out.read_text()) if out.exists() else None
         out.write_text(json.dumps(collect_person(person, since, previous), indent=1, ensure_ascii=False))
         print("Wrote", out)
 
