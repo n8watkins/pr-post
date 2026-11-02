@@ -151,7 +151,7 @@ class Render(unittest.TestCase):
         self.assertIn("open it by hand", self.text)
 
     def test_no_em_dashes(self):
-        self.assertNotIn("—", self.text)
+        self.assertNotIn(chr(0x2014), self.text)
 
 
 if __name__ == "__main__":
