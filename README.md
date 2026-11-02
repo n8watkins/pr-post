@@ -96,7 +96,7 @@ Invalid entries fail loudly with the field that is wrong.
 | `PR_POST_PAPER` | The paper folder when `--paper` is not given (the workflow sets it from the repository variable, default `demo`) |
 | `GITHUB_TOKEN` | GitHub API access; Actions provides one automatically |
 | `PR_POST_SITE_URL`, `PR_POST_BASE_PATH` | Override `[site] url` and `base_path`; the Pages workflow sets them |
-| `RESEND_API_KEY` | Only for `send_email.py` |
+| `RESEND_API_KEY` | Only for `send_email.py` (`--dry-run` checks everything without sending) |
 
 ## feed.json: show who you follow on your own site
 
@@ -125,6 +125,7 @@ See **[docs/writers.md](docs/writers.md)**.
   A public site never prints them either; only a private site that opts in with `show_private_counts` does.
 - Nothing is committed back by the demo workflow: collected data stays in the Actions cache and only the built site is published.
 - For a paper only you and friends can read, see **[docs/private-mode.md](docs/private-mode.md)**.
+  It also shows how to keep that paper in its own private repository and run this engine from it at a pinned release.
 
 ## How it is built
 

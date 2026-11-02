@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { validatePeople, replacePeople, checkClaims, decodeJwt, PEOPLE_MARKER } from "../worker/lib.js";
+import { validatePeople, replacePeople, checkClaims, decodeJwt, realm, PEOPLE_MARKER } from "../worker/lib.js";
 
 const person = { github: "simonw", name: "Simon", ticker: "simw", orgs: ["datasette"], links: [{ label: "X", url: "https://x.com/simonw" }] };
 const tuber = { id: "nateherk", name: "Nate Herk", youtube_channel_id: "UC2ojq-nuP8ceeHqiroeKhBA" };
@@ -58,4 +58,30 @@ test("checkClaims enforces audience, issuer and expiry", () => {
 
 test("decodeJwt rejects malformed tokens", () => {
   assert.throws(() => decodeJwt("nope"), /malformed/);
+});
+
+test("realm names the paper in the sign-in prompt and cannot break the header", () => {
+  assert.equal(realm({}), "pr-post");
+  assert.equal(realm({ SITE_TITLE: "The Test Gazette" }), "The Test Gazette");
+  assert.equal(realm({ SITE_TITLE: 'Bad "title"\r\nX-Evil: 1' }), "Bad titleX-Evil: 1");
+});
+
+test("the Worker serves nothing without sign-in", async () => {
+  const worker = (await import("../worker/index.js")).default;
+  const testPassword = "x".repeat(12); // a throwaway value, built here so it never looks like a real secret
+  let served = false;
+  const ASSETS = { fetch: async () => { served = true; return new Response("content"); } };
+
+  const locked = await worker.fetch(new Request("https://paper.example/"), { ASSETS });
+  assert.equal(locked.status, 503);
+
+  const prompt = await worker.fetch(new Request("https://paper.example/p/octo/"), { ASSETS, SITE_PASSWORD: testPassword, SITE_TITLE: "The Test Gazette" });
+  assert.equal(prompt.status, 401);
+  assert.equal(prompt.headers.get("WWW-Authenticate"), 'Basic realm="The Test Gazette", charset="UTF-8"');
+  assert.equal(prompt.headers.get("Cache-Control"), "private, no-store");
+  assert.doesNotMatch(await prompt.text(), /content/);
+
+  const wrong = await worker.fetch(new Request("https://paper.example/", { headers: { Authorization: "Basic !!!" } }), { ASSETS, SITE_PASSWORD: testPassword });
+  assert.equal(wrong.status, 401);
+  assert.equal(served, false);
 });

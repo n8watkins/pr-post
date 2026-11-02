@@ -1,12 +1,17 @@
 """The site: untrusted text becomes safe HTML, and a public site never prints private work."""
 
+import contextlib
+import io
 import os
 import re
+import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from helpers import all_html, build_fixture, build_site
-from fixture_paper import PRIVATE_COUNT, PRIVATE_REPO
+from fixture_paper import PRIVATE_COUNT, PRIVATE_REPO, write_paper
 from md import blocks, safe_url
 
 import send_email
@@ -43,6 +48,49 @@ class Email(unittest.TestCase):
         self.assertIn("The Test Gazette", page)
         self.assertNotIn("javascript:", page)
         self.assertNotIn("<b>more</b>", page)
+
+
+class EmailRun(unittest.TestCase):
+    """send_email.py end to end against a paper in its own repository, with Resend never reachable."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = Path(tmp.name) / "private-paper"
+        (self.repo / ".git").mkdir(parents=True)
+        write_paper(self.repo, 'mode = "private"')
+        with open(self.repo / "watchlist.toml", "a") as f:
+            f.write('\n[email]\nto = "reader@example.com"\n\n[delivery]\nemail = true\n\n[links]\nrepo = "https://github.com/me/private-paper"\n')
+        self.report = self.repo / "reports" / "octo" / "2026-10-31-weekly.md"
+        self.report.parent.mkdir(parents=True)
+        self.report.write_text("# Octo Cat: Oct 25 to Oct 31\n\n## TL;DR\n- shipped a parser\n")
+
+    def run_main(self, *args, env=None):
+        out = io.StringIO()
+        argv = ["send_email.py", "--paper", str(self.repo), str(self.report), *args]
+        never = mock.Mock(side_effect=AssertionError("tried to contact Resend"))
+        with mock.patch.object(sys, "argv", argv), mock.patch.dict(os.environ, env or {}, clear=False), \
+                mock.patch("urllib.request.urlopen", never), contextlib.redirect_stdout(out):
+            send_email.main()
+        return out.getvalue()
+
+    def test_dry_run_checks_everything_and_sends_nothing(self):
+        preview = self.repo / "digest.html"
+        out = self.run_main("--dry-run", "--preview", str(preview), env={"RESEND_API_KEY": "re_test_not_a_key"})
+        self.assertIn("Dry run", out)
+        self.assertIn("Weekly Report: Octo Cat: Oct 25 to Oct 31", out)
+        self.assertIn("RESEND_API_KEY is set", out)
+        self.assertNotIn("re_test_not_a_key", out)
+        self.assertNotIn("reader@example.com", out)
+        page = preview.read_text()
+        self.assertIn("The Test Gazette", page)
+        # The GitHub link points into the paper's own repository, not the engine's.
+        self.assertIn("https://github.com/me/private-paper/blob/main/reports/octo/2026-10-31-weekly.md", page)
+
+    def test_dry_run_still_respects_email_being_off(self):
+        text = (self.repo / "watchlist.toml").read_text().replace("email = true", "email = false")
+        (self.repo / "watchlist.toml").write_text(text)
+        self.assertIn("turned off", self.run_main("--dry-run"))
 
 
 class Markdown(unittest.TestCase):

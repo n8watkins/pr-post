@@ -3,11 +3,12 @@
 // Every request must be signed in before anything is served:
 //   1. Cloudflare Access (preferred): set ACCESS_TEAM_DOMAIN and ACCESS_AUD;
 //      the Worker verifies the Access token on every request.
-//   2. Until Access is set up: HTTP Basic auth with the SITE_PASSWORD secret.
+//   2. Until Access is set up: HTTP Basic auth with the SITE_PASSWORD secret
+//      (the browser's prompt names SITE_TITLE, default "pr-post").
 //   3. Neither configured: the site refuses to serve.
 // /api/watchlist lets the settings page commit watchlist.toml via GitHub.
 
-import { decodeJwt, checkClaims, validatePeople, replacePeople } from "./lib.js";
+import { decodeJwt, checkClaims, validatePeople, replacePeople, realm } from "./lib.js";
 
 const SECURITY_HEADERS = {
   "X-Robots-Tag": "noindex, nofollow",
@@ -90,7 +91,7 @@ async function authorize(request, env) {
   if (env.SITE_PASSWORD) {
     const user = verifyPassword(request, env);
     if (user) return { user };
-    return { response: withHeaders(new Response("This paper is private.", { status: 401, headers: { "WWW-Authenticate": 'Basic realm="pr-post", charset="UTF-8"' } })) };
+    return { response: withHeaders(new Response("This paper is private.", { status: 401, headers: { "WWW-Authenticate": `Basic realm="${realm(env)}", charset="UTF-8"` } })) };
   }
   return { response: withHeaders(new Response("This paper is locked: no sign-in is configured yet. See docs/private-mode.md.", { status: 503 })) };
 }
