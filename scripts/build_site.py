@@ -30,6 +30,7 @@ ROOT = config.ROOT
 FONTS = ("https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,800;6..96,900"
          "&family=Newsreader:opsz,wght@6..72,400;6..72,600&family=JetBrains+Mono:wght@500;700&display=swap")
 ARROW_MIN_DAYS = 4  # compare against a snapshot at least this old
+FACTS_SIDE_MAX = 6  # births and obituaries the facts edition prints before "plus N more"
 REPO_URL = "https://github.com/n8watkins/pr-post"
 FAVICON = ("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2317171a'/%3E"
            "%3Ctext x='16' y='23' font-family='Georgia,serif' font-weight='900' font-size='20' text-anchor='middle' fill='%23f8f7f3'%3EP%3C/text%3E%3C/svg%3E")
@@ -216,29 +217,34 @@ def release_name(r):
 
 
 def facts_story(p, st):
-    """Headline, beat, score and an escaped HTML summary for one person, from facts only."""
-    name = p["name"]
+    """Headline, beat, score and an escaped HTML summary for one person, from facts only.
+
+    The reader's own entry (self = true) is written in the second person, like their reports.
+    """
+    you = bool(p.get("self"))
+    name = "You" if you else p["name"]
+    verb = (lambda third, base: base) if you else (lambda third, base: third)
     prs = st["public_merged_prs"]
     rel, vids, births = st["releases"], st["videos"], st["births"]
     pr_repos = [r for r in st["repos"] if r["merged_prs"] and not r.get("private")]
     commits = st["commits"]
     if rel:
-        hed = f"{name} ships {release_name(rel[0])}" + (f" and {plural(len(rel) - 1, 'more release')}" if len(rel) > 1 else "")
+        hed = f"{name} {verb('ships', 'ship')} {release_name(rel[0])}" + (f" and {plural(len(rel) - 1, 'more release')}" if len(rel) > 1 else "")
         beat = "Release desk"
     elif prs:
-        hed = f"{name} merges {plural(prs, 'PR')}" + (f" across {plural(len(pr_repos), 'repo')}" if len(pr_repos) > 1 else f" in {short_repo(pr_repos[0]['repo'])}" if pr_repos else "")
+        hed = f"{name} {verb('merges', 'merge')} {plural(prs, 'PR')}" + (f" across {plural(len(pr_repos), 'repo')}" if len(pr_repos) > 1 else f" in {short_repo(pr_repos[0]['repo'])}" if pr_repos else "")
         beat = "GitHub desk"
     elif vids:
-        hed = f"{name} posts {quote_title(vids[0]['title'], 70)}" if len(vids) == 1 else f"{name} posts {plural(len(vids), 'video')}"
+        hed = f"{name} {verb('posts', 'post')} " + (quote_title(vids[0]['title'], 70) if len(vids) == 1 else plural(len(vids), 'video'))
         beat = "Video desk"
     elif births:
-        hed = f"{name} starts {short_repo(births[0]['repo'])}"
+        hed = f"{name} {verb('starts', 'start')} {short_repo(births[0]['repo'])}"
         beat = "New repos"
     elif commits:
-        hed = f"{name} pushes {plural(commits, 'commit')}"
+        hed = f"{name} {verb('pushes', 'push')} {plural(commits, 'commit')}"
         beat = "GitHub desk"
     else:
-        hed = f"A quiet week for {name}"
+        hed = "A quiet week for you" if you else f"A quiet week for {name}"
         beat = "Quiet desk"
 
     bits = []
@@ -281,8 +287,11 @@ def facts_edition(people, stats):
     if items:
         body.append("From the record: " + "; ".join(
             f"{ext(i['url'], esc(quote_title(i['title'], 80)))} ({esc(short_repo(i['repo'])) + ', ' if i['repo'] else ''}{day_short(i['date'])})" for i in items) + ".")
-    births = [{"repo": b["repo"], "url": b["url"], "html": f'{esc(b["description"]) or "No description yet."} <span class="muted">{esc(p["name"])}</span>'}
+    # Newest first, and only a handful, so the side column stays beside the lead story.
+    births = [{"repo": b["repo"], "url": b["url"], "date": b["date"],
+               "html": f'{esc(b["description"]) or "No description yet."} <span class="muted">{esc(p["name"])}</span>'}
               for p, st in rows for b in st["births"]]
+    births.sort(key=lambda b: b["date"], reverse=True)
     obits = [{"name": short_repo(d["repo"]), "url": d["url"], "html": f"{esc(d['repo'])} was archived."} for _, st in rows for d in st["deaths"]]
     quote_item = next((i for i in lst["recent"] if i["type"] in ("pr", "video")), None)
     quote = {"text": quote_item["title"], "url": quote_item["url"], "by": lp["name"],
@@ -297,8 +306,10 @@ def facts_edition(people, stats):
                  "body_html": body,
                  "sources": [{"label": quote_title(i["title"], 40), "url": i["url"]} for i in items[:3]]},
         "stories": sorted([s for s in stories if s["id"] != lp["id"]], key=lambda s: -s["score"]),
-        "births_html": births,
-        "obituaries_html": obits,
+        "births_html": births[:FACTS_SIDE_MAX],
+        "births_more": max(0, len(births) - FACTS_SIDE_MAX),
+        "obituaries_html": obits[:FACTS_SIDE_MAX],
+        "obituaries_more": max(0, len(obits) - FACTS_SIDE_MAX),
         "quote": quote,
         "corrections": [],
         "number": 0,
@@ -449,8 +460,11 @@ def front_page(edition, people, snaps, written_count):
 </div>"""
 
     if facts:
+        more = lambda k, what: f'<p class="muted">Plus {plural(k, what)}; see each person\'s page.</p>' if k else ""
         obits = "".join(f'<p><span class="who-line">{ext(o["url"], esc(o["name"]))}</span>{o["html"]}</p>' for o in edition["obituaries_html"])
+        obits += more(edition.get("obituaries_more", 0), "more archived repo")
         births = "".join(f'<p><span class="who-line">{ext(b["url"], esc(short_repo(b["repo"])))}</span>{b["html"]}</p>' for b in edition["births_html"])
+        births += more(edition.get("births_more", 0), "more new repo")
     else:
         obits = "".join(f'<p><span class="who-line">{ext(o["url"], esc(o["name"]))}</span>{inline(o["text"])}</p>' for o in edition.get("obituaries", []))
         births = "".join(f'<p><span class="who-line">{ext("https://github.com/" + b["repo"], esc(short_repo(b["repo"])))}</span>{inline(b["text"])}</p>' for b in edition.get("births", []))
