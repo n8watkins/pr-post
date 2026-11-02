@@ -91,6 +91,7 @@ To find a channel id, open the channel page, view the page source and search for
 
 Links from a person's GitHub profile (website, X, Bluesky and so on) are added automatically.
 Invalid entries fail loudly with the field that is wrong.
+Before adding someone, `python3 scripts/research_person.py <github-username>` drafts their entry and a profile with every link it can find and verify; **[docs/adding-people.md](docs/adding-people.md)** is the full intake checklist.
 
 | Environment variable | Used for |
 | --- | --- |
@@ -139,6 +140,7 @@ See **[docs/writers.md](docs/writers.md)**.
 | `scripts/feed.py` | The feed builder, a JSON Schema validator and `--check` |
 | `scripts/config.py` | Loads and validates `watchlist.toml` |
 | `scripts/send_email.py` | Optional email digests of written reports |
+| `scripts/research_person.py` | Drafts a watch list entry and profile for someone new, for review |
 | `site/assets/` | The newspaper's CSS and JavaScript |
 | `worker/` | Optional Cloudflare Worker for private mode |
 | `demo/watchlist.toml` | The demo paper |
