@@ -15,6 +15,7 @@ pr-post turns the public GitHub and YouTube activity of the people you choose in
 ## What it does
 
 - **Collects public facts** twice a week: merged pull requests, commits, releases, new and archived repositories and the contribution graph from GitHub, and recent videos from a channel's YouTube RSS feed (no API key).
+  If a YouTube feed fails, the videos from the previous run are kept, so a flaky feed never blanks a page.
 - **Prints a newspaper** from those facts alone: a front page with a lead story, box scores and a commit ticker, and a page per person with their week, recent work, videos and the repositories where the time went.
   No AI is needed.
 - **Publishes `feed.json`**, a documented and versioned feed of who you follow and what they shipped, for your own site.

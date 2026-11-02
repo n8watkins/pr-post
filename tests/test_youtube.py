@@ -80,3 +80,33 @@ class Collect(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FeedFailure(unittest.TestCase):
+    """A failed fetch keeps the previous run's videos instead of blanking the person."""
+
+    person = {"id": "tuber", "github": None, "orgs": [], "youtube_channel_id": "UCaaaaaaaaaaaaaaaaaaaaaa"}
+    last = {"id": "tuber", "collected_at": "2026-10-28T11:00:00+00:00", "github": None, "errors": [],
+            "youtube": {"channel_id": "UCaaaaaaaaaaaaaaaaaaaaaa", "channel_url": "https://www.youtube.com/channel/UCaaaaaaaaaaaaaaaaaaaaaa",
+                        "channel_title": "Tube", "videos": [{"id": "AAAAAAAAAA1", "title": "Old but recent"}], "latest": []}}
+
+    def collect(self, previous):
+        import collect
+        with mock.patch.object(youtube, "collect", side_effect=youtube.FeedError("HTTP Error 404")), \
+                mock.patch("sys.stderr"):
+            return collect.collect_person(self.person, dt.date(2026, 10, 24), previous)
+
+    def test_keeps_previous_videos_and_records_the_error(self):
+        out = self.collect(self.last)
+        self.assertEqual(out["youtube"]["videos"], self.last["youtube"]["videos"])
+        self.assertEqual(out["youtube"]["carried_over_from"], "2026-10-28T11:00:00+00:00")
+        self.assertEqual(out["errors"][0]["source"], "youtube")
+
+    def test_carry_over_keeps_the_original_date_across_several_failures(self):
+        once = {**self.collect(self.last), "collected_at": "2026-10-31T11:00:00+00:00"}
+        self.assertEqual(self.collect(once)["youtube"]["carried_over_from"], "2026-10-28T11:00:00+00:00")
+
+    def test_nothing_to_keep_on_a_first_run_or_a_changed_channel(self):
+        self.assertIsNone(self.collect(None)["youtube"])
+        other = {**self.last, "youtube": {**self.last["youtube"], "channel_id": "UCbbbbbbbbbbbbbbbbbbbbbb"}}
+        self.assertIsNone(self.collect(other)["youtube"])
