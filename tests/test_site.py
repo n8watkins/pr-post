@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from helpers import all_html, build_fixture, build_site
+from helpers import all_html, build_fixture, build_site, config
 from fixture_paper import PRIVATE_COUNT, PRIVATE_REPO, write_paper
 from md import blocks, safe_url
 
@@ -167,6 +167,34 @@ class PrivateBuild(unittest.TestCase):
         tmp, _, out, _ = build_fixture("show_private_counts = true")
         self.addCleanup(tmp.cleanup)
         self.assertNotIn(f"{PRIVATE_COUNT:,}", all_html(out))
+
+
+def facts_stats(**over):
+    """The smallest stats entry facts_story and facts_edition need."""
+    st = {"public_merged_prs": 0, "releases": [], "videos": [], "births": [], "deaths": [], "repos": [], "commits": 0,
+          "recent": [], "has_github": True, "has_youtube": False, "window": {"start": "2026-10-25", "end": "2026-10-31"}}
+    return {**st, **over}
+
+
+class FactsEdition(unittest.TestCase):
+    def test_the_reader_is_written_in_the_second_person(self):
+        st = facts_stats(public_merged_prs=3, repos=[{"repo": "me/app", "merged_prs": 3, "commits": 0}])
+        me = {"id": "me", "name": "Nat", "self": True}
+        self.assertEqual(build_site.facts_story(me, st)["headline"], "You merge 3 PRs in app")
+        self.assertEqual(build_site.facts_story({**me, "self": False}, st)["headline"], "Nat merges 3 PRs in app")
+        self.assertEqual(build_site.facts_story(me, facts_stats())["headline"], "A quiet week for you")
+
+    def test_side_column_keeps_the_newest_few_births(self):
+        births = [{"repo": f"o/r{i}", "url": f"https://github.com/o/r{i}", "description": "", "date": f"2026-10-{20 + i:02d}"} for i in range(9)]
+        people = [{"id": "o", "name": "O", "ticker": "O"}]
+        e = build_site.facts_edition(people, {"o": facts_stats(births=births)})
+        self.assertEqual([b["repo"] for b in e["births_html"]], ["o/r8", "o/r7", "o/r6", "o/r5", "o/r4", "o/r3"])
+        self.assertEqual(e["births_more"], 3)
+        build_site.configure(config.parse("")["site"])
+        page = build_site.front_page(e, people, [{"date": "2026-10-31", "people": {"o": facts_stats(births=births)}}], 0)
+        side = page[page.index('<div class="side">'):]
+        self.assertIn("Plus 3 more new repos", side)
+        self.assertNotIn("o/r2", side)
 
 
 class BasePath(unittest.TestCase):
