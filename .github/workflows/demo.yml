@@ -32,14 +32,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - id: pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
       - name: Restore earlier data
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             ${{ env.PR_POST_PAPER }}/data
@@ -55,7 +55,7 @@ jobs:
           # Keep about three weeks of snapshots.
           ls -1 "$PR_POST_PAPER"/stats/*.json | sort | head -n -12 | xargs -r rm
       - name: Save data for the next run
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: |
             ${{ env.PR_POST_PAPER }}/data
@@ -68,7 +68,7 @@ jobs:
         run: python3 scripts/build_site.py --out _site
       - name: Check the feed (fails if it is empty or invalid)
         run: python3 scripts/feed.py --check _site/feed.json
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
 
@@ -80,4 +80,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
