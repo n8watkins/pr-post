@@ -140,6 +140,30 @@ export function checkClaims(payload, { aud, teamDomain, now = Date.now() / 1000 
   return null;
 }
 
+export function timingSafeEqual(a, b) {
+  const ea = new TextEncoder().encode(String(a));
+  const eb = new TextEncoder().encode(String(b));
+  if (ea.length !== eb.length) return false;
+  if (crypto.subtle.timingSafeEqual) return crypto.subtle.timingSafeEqual(ea, eb);
+  let diff = 0; // Node (the tests) has no crypto.subtle.timingSafeEqual
+  for (let i = 0; i < ea.length; i++) diff |= ea[i] ^ eb[i];
+  return diff === 0;
+}
+
+/**
+ * "jobs" or "writer" for a request carrying that role's bearer token, "invalid"
+ * for any other bearer token, and null when there is none (a browser).
+ * Tokens shorter than 32 characters never match, so an empty secret can't open anything.
+ */
+export function bearerRole(request, env) {
+  const m = (request.headers.get("Authorization") || "").match(/^Bearer\s+(\S+)$/i);
+  if (!m) return null;
+  for (const [role, secret] of [["jobs", env.JOBS_TOKEN], ["writer", env.WRITER_TOKEN]]) {
+    if (secret && secret.length >= 32 && timingSafeEqual(m[1], secret)) return role;
+  }
+  return "invalid";
+}
+
 /** The name the browser's sign-in prompt shows: SITE_TITLE without characters that would break the header. */
 export function realm(env) {
   return String(env.SITE_TITLE || "pr-post").replace(/["\\\r\n]/g, "").slice(0, 80) || "pr-post";

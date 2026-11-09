@@ -6,12 +6,21 @@
 //   2. Until Access is set up: HTTP Basic auth with the SITE_PASSWORD secret
 //      (the browser's prompt names SITE_TITLE, default "pr-post").
 //   3. Neither configured: the site refuses to serve.
-// /api/watchlist lets the settings page commit watchlist.toml via GitHub.
-// /act/<token> is the one exception to sign-in: the one-click links in the Who
-// to follow email (scripts/act_lib.py). The signed, expiring token is the
-// credential, a GET only shows a page, and only that page's POST acts.
+// /api/watchlist lets the settings page save the watch list: into D1 when the
+// Worker has the paper's storage (worker/store.js), else into watchlist.toml
+// on GitHub.
+// Two exceptions to sign-in:
+//   /act/<token>: the one-click links in the Who to follow email
+//     (scripts/act_lib.py). The signed, expiring token is the credential, a GET
+//     only shows a page, and only that page's POST acts.
+//   /api/paper/* and /api/site/* with "Authorization: Bearer <token>": the jobs
+//     (JOBS_TOKEN) and the writer (WRITER_TOKEN) read and write the paper's
+//     storage, each within its own lane (worker/store.js).
+// With an R2 bucket bound as STORE the site is served from it (SITE_PREFIX);
+// without one, from the static assets deployed with the Worker.
 
-import { decodeJwt, checkClaims, validatePeople, replacePeople, realm, verifyAction, signAction, UNDO } from "./lib.js";
+import { decodeJwt, checkClaims, validatePeople, replacePeople, realm, verifyAction, signAction, UNDO, timingSafeEqual, bearerRole } from "./lib.js";
+import { handleStore, serveSite, saveActivePeople, actionUsed } from "./store.js";
 
 const SECURITY_HEADERS = {
   "X-Robots-Tag": "noindex, nofollow",
@@ -65,13 +74,6 @@ async function verifyAccess(request, env) {
   return { who: payload.email || "access" };
 }
 
-function timingSafeEqual(a, b) {
-  const ea = new TextEncoder().encode(a);
-  const eb = new TextEncoder().encode(b);
-  if (ea.length !== eb.length) return false;
-  return crypto.subtle.timingSafeEqual(ea, eb);
-}
-
 function verifyPassword(request, env) {
   const m = (request.headers.get("Authorization") || "").match(/^Basic\s+(.+)$/i);
   if (!m) return null;
@@ -111,7 +113,7 @@ async function saveWatchlist(request, env, user) {
   const origin = request.headers.get("Origin");
   if (!origin || new URL(origin).host !== new URL(request.url).host) return json(403, { error: "Saving is only allowed from this site." });
   if (!(request.headers.get("Content-Type") || "").startsWith("application/json")) return json(415, { error: "Expected JSON." });
-  if (!env.GITHUB_TOKEN) return json(501, { error: "Saving needs a GitHub token on the Worker. See docs/private-mode.md." });
+  if (!env.DB && !env.GITHUB_TOKEN) return json(501, { error: "Saving needs a GitHub token on the Worker. See docs/private-mode.md." });
 
   let people;
   try {
@@ -120,6 +122,11 @@ async function saveWatchlist(request, env, user) {
     people = validatePeople(JSON.parse(text));
   } catch (err) {
     return json(400, { error: err.message });
+  }
+  if (env.DB) {
+    await saveActivePeople(env, people, user.who);
+    console.log(`watch list saved by ${user.who}: ${people.length} people`);
+    return json(200, { ok: true });
   }
 
   const path = env.WATCHLIST_PATH || "watchlist.toml";
@@ -217,6 +224,7 @@ async function notReady(env, action) {
 
 /** True when the paper's action log already has this link's nonce (the act workflow refuses it too). */
 async function alreadyUsed(env, nonce) {
+  if (env.DB) return actionUsed(env, nonce);
   const r = await actionsApi(env, "contents/follow/actions.jsonl?ref=main", { headers: { Accept: "application/vnd.github.raw+json" } });
   if (!r.ok) return false;
   return (await r.text()).includes(`"nonce":"${nonce}"`);
@@ -272,14 +280,24 @@ export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
     if (path === "/act" || path.startsWith("/act/")) return handleAct(request, env, new URL(request.url));
+    const url = new URL(request.url);
+    const machine = bearerRole(request, env);
+    if (machine) {
+      // A bearer token is only ever for the storage API; a wrong one is refused outright.
+      if (machine === "invalid") return json(401, { error: "That token is not valid." });
+      return withHeaders((await handleStore(request, env, url, machine)) || new Response(JSON.stringify({ error: "Not found." }), { status: 404, headers: { "Content-Type": "application/json" } }));
+    }
     const auth = await authorize(request, env);
     if (auth.response) return auth.response;
-    const url = new URL(request.url);
     if (url.pathname === "/api/watchlist") {
       if (request.method === "PUT") return saveWatchlist(request, env, auth.user);
       return json(405, { error: "Use PUT." });
     }
-    if (url.pathname.startsWith("/api/")) return json(404, { error: "Not found." });
+    if (url.pathname.startsWith("/api/")) {
+      const stored = await handleStore(request, env, url, "owner");
+      return stored ? withHeaders(stored) : json(404, { error: "Not found." });
+    }
+    if (env.STORE) return withHeaders(await serveSite(request, env));
     return withHeaders(await env.ASSETS.fetch(request));
   },
 };

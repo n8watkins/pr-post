@@ -48,10 +48,44 @@ A private site also tells search engines not to index it.
    Create a fine-grained GitHub token with **Contents: Read and write** on your repository only, then `npx wrangler secret put GITHUB_TOKEN`.
    The settings page then commits your watch list after validating every field.
 
+## Keeping the paper out of git: D1 and R2
+
+A private paper holds things that should not sit in any repository: the people you follow, their profiles, written reports, your email address.
+The Worker can keep all of it in Cloudflare instead, behind the same sign-in, so the code stays in one public repository and nothing private is ever committed.
+This is how the owner's paper runs (`paper/` in this repository).
+
+| What | Where | Read and written by |
+| --- | --- | --- |
+| The watch list (people, their status, sources and socials) and the other `watchlist.toml` tables | D1 `people` and `settings` | You on the site; jobs read it |
+| Profiles | D1 `people.profile` | Jobs; the writer may only add to the end |
+| Who to follow state, the one-click action log | D1 `follow_candidates`, `follow_meta`, `actions` | Jobs |
+| `data/`, `stats/`, `briefs/`, `reports/`, `editions/`, `summaries/`, `follow/` mini reports, `notes/`, `logs/`, `previews/`, `backups/` | R2, under `paper/` | Jobs; the writer reads briefs, data, reports, editions and summaries and writes reports and editions |
+| The built site | R2, under `SITE_PREFIX` (`site/`) | The publish job; the Worker serves it after sign-in |
+
+Bind a D1 database as `DB` (apply `paper/migrations/`) and an R2 bucket as `STORE`; `paper/wrangler.jsonc` is a complete example, including a staging Worker on the same storage that serves `site-next/`.
+With `STORE` bound the Worker serves the site from R2 and needs no static assets, so new content never needs a deploy.
+
+Jobs and the writer reach the storage with a bearer token instead of the sign-in: `JOBS_TOKEN` for GitHub Actions and `WRITER_TOKEN` for an AI writer such as a Claude routine.
+Both are Worker secrets of at least 32 characters; `worker/store.js` decides what each may read and write, and checks every upload against its SHA-256.
+
+The engine's scripts still work on a plain folder.
+`scripts/store.py` moves the paper between Cloudflare and a working folder, with `PR_POST_API` set to the Worker's address and `PR_POST_TOKEN` to a token:
+
+```sh
+python3 scripts/store.py pull work                 # watchlist.toml (active people only), profiles, files, follow state, action log
+python3 scripts/collect.py --paper work            # any engine script
+python3 scripts/stats.py --paper work
+python3 scripts/store.py push work                 # uploads only what changed
+python3 scripts/build_site.py --paper work --out dist
+python3 scripts/store.py site dist                 # publishes the site, then removes pages the build no longer has
+```
+
+`store.py` prints counts only, never file names, so it is safe in the public logs of a public repository's Actions; `--verbose` lists paths for local use.
+Keep every other step quiet too: Actions logs, artifacts and workflow inputs of a public repository are readable by anyone.
+
 ## A paper in its own private repository
 
-A private paper usually holds things that should not sit in a public fork: the people you follow, written reports, your email address.
-Keep those in a private repository of their own and run this engine from it, pinned to a release, so there is one copy of the code and upgrades are a one-line change.
+If you would rather keep your paper in git, put it in a private repository of its own and run this engine from it, pinned to a release, so there is one copy of the code and upgrades are a one-line change.
 
 The private repository holds only the paper and its deployment settings:
 
@@ -111,6 +145,8 @@ To test the email without sending it, run `send_email.py --dry-run --preview dig
 | `CLOUDFLARE_API_TOKEN` | Your machine or a repository secret | Deploying |
 | `ACTION_SIGNING_KEY` | Worker secret and repository secret (same value) | Optional one-click links in the Who to follow email ([who-to-follow.md](who-to-follow.md)) |
 | `ACTIONS_TOKEN` | Worker secret | Starting the paper's `act.yml` workflow from those links |
+| `JOBS_TOKEN` | Worker secret and repository secret (same value) | Jobs reading and writing the paper's D1 and R2 storage |
+| `WRITER_TOKEN` | Worker secret and the writer's environment | An AI writer reading briefs and writing reports |
 | `FOLLOW_GITHUB_TOKEN` | Repository secret | Following and unfollowing from those links (Followers: read and write only) |
 
 Never commit keys; `.env` files are ignored.

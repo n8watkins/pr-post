@@ -4,6 +4,7 @@
   "private": true,
   "description": "Follow what your favorite builders ship: a newspaper and a feed.json from their public GitHub and YouTube work.",
   "license": "MIT",
+  "type": "module",
   "scripts": {
     "test": "python3 -m unittest discover -s tests && node --test tests/*.test.mjs",
     "release": "release-kit release",
