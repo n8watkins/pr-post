@@ -56,7 +56,7 @@ def user(**over):
                                      {"provider": "INSTAGRAM", "url": "https://www.instagram.com/jane"},
                                      {"provider": "GENERIC", "url": "javascript:alert(1)"}]},
         "organizations": {"nodes": [{"login": "acme"}]},
-        "pinnedItems": {"nodes": [repo("edge-sdk", 5000, "Cloudflare Workers SDK — fast", owner="acme",
+        "pinnedItems": {"nodes": [repo("edge-sdk", 5000, "Cloudflare Workers SDK \u2014 fast", owner="acme",
                                        release={"name": "v2", "tagName": "v2", "publishedAt": "2026-10-20T00:00:00Z", "url": "https://github.com/acme/edge-sdk/releases/tag/v2"})]},
         "top": {"totalCount": 3, "nodes": [repo("whisper-cli", 900, "Local whisper.cpp dictation CLI", "Rust", ["cli"]),
                                            repo("dotfiles", 5, "", "Shell")]},
@@ -82,10 +82,10 @@ def paper_with_follow():
 
 class Guardrails(unittest.TestCase):
     def test_clean_strips_contact_details_and_em_dashes(self):
-        out = fl.clean("Write to a.b@example.com or call +44 20 7946 0958 — thanks")
+        out = fl.clean("Write to a.b@example.com or call +44 20 7946 0958 \u2014 thanks")
         self.assertNotIn("@example.com", out)
         self.assertNotIn("7946", out)
-        self.assertNotIn("—", out)
+        self.assertNotIn("\u2014", out)
 
     def test_location_is_city_and_country_at_most(self):
         self.assertEqual(fl.city_country("Lisbon, Portugal"), "Lisbon, Portugal")
@@ -108,7 +108,7 @@ class MiniReport(unittest.TestCase):
     def test_no_personal_contact_details_anywhere(self):
         self.assertNotIn("jane@example.com", self.text)
         self.assertNotIn("555", self.text)
-        self.assertNotIn("—", self.text)
+        self.assertNotIn("\u2014", self.text)
 
     def test_every_fact_has_a_source(self):
         for w in self.r["work"]:
