@@ -427,12 +427,20 @@ def render(r):
             "- A newsletter or blog feed, if none is listed above.",
             "- Open every \"open it by hand\" link and confirm it is them (same name and photo, or a link back).",
             "", f"_Draft generated {r['researched']} by research_person.py. Review before committing._", ""]
-    block = ["[[people]]", f"github = {toml_str(login)}", f"ticker = {toml_str(r['ticker'])}", f"name = {toml_str(name)}"]
-    if orgs:
-        block.append("orgs = [" + ", ".join(toml_str(o) for o in orgs) + "]")
+    out += ["<!-- watchlist.toml draft. Links on their GitHub profile are added automatically, so only others are listed.", "",
+            *watchlist_block(r), "-->", ""]
+    return "\n".join(out)
+
+
+def watchlist_block(r, known_for="TODO"):
+    """The [[people]] entry for watchlist.toml, as lines."""
+    f, yt = r["facts"], r["youtube"]
+    block = ["[[people]]", f"github = {toml_str(f['login'])}", f"ticker = {toml_str(r['ticker'])}", f"name = {toml_str(f['name'])}"]
+    if r["orgs"]:
+        block.append("orgs = [" + ", ".join(toml_str(o) for o in r["orgs"]) + "]")
     if yt["id"]:
         block.append(f"youtube_channel_id = {toml_str(yt['id'])}")
-    block.append('known_for = "TODO"')
+    block.append(f"known_for = {toml_str(known_for)}")
     extra = [l for l in r["links"] if l["theirs"] and "GitHub profile" not in l["source"]
              and not (l.get("check") or "").startswith("broken")]
     if yt["id"] and not any(l["label"] == "YouTube" and l["theirs"] for l in r["links"]):
@@ -441,9 +449,7 @@ def render(r):
         block.append("links = [")
         block += [f"  {{ label = {toml_str(l['label'])}, url = {toml_str(l['url'])} }}," for l in extra]
         block.append("]")
-    out += ["<!-- watchlist.toml draft. Links on their GitHub profile are added automatically, so only others are listed.", "",
-            *block, "-->", ""]
-    return "\n".join(out)
+    return block
 
 
 def main():
