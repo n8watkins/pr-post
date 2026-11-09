@@ -125,7 +125,7 @@ def repo_text(r):
 
 
 # Languages that say little about someone's stack.
-NOISE_LANGUAGES = {"HTML", "CSS", "SCSS", "Shell", "PowerShell", "Batchfile", "Makefile", "Dockerfile", "Nix", "Procfile", "Jupyter Notebook", "Roff", "TeX", "Smarty", "EJS", "Handlebars", "Less", "Vim Script"}
+NOISE_LANGUAGES = {"HTML", "CSS", "SCSS", "Shell", "PowerShell", "Batchfile", "Makefile", "Dockerfile", "Nix", "Procfile", "Jupyter Notebook", "Roff", "TeX", "Rich Text Format", "Markdown", "Text", "Smarty", "EJS", "Handlebars", "Less", "Vim Script"}
 
 
 def tech_of(repos, vocab, recent_since=None):
@@ -530,7 +530,7 @@ def render_md(report, scored=None):
         out += [f"**Tech:** {', '.join(t['languages']) or 'no languages detected'}"
                 + (f"; {', '.join(t['frameworks'])}" if t["frameworks"] else "") + f" ({_link('their repos', t['source'])})", ""]
     a = r["activity"]
-    out += ["", f"**Activity:** {a['last_12w']:,} contributions in the last 12 weeks against {a['prev_12w']:,} in the 12 before ({a['trend']})"
+    out += [f"**Activity:** {a['last_12w']:,} contributions in the last 12 weeks against {a['prev_12w']:,} in the 12 before ({a['trend']})"
                + (f", last push {a['last_push']}" if a.get("last_push") else "") + f" ({_link('GitHub', a['source'])})", ""]
     s = r["standing"]
     standing = f"{s['followers']:,} followers, {s['stars']:,} stars across their own repos"

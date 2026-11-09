@@ -5,7 +5,7 @@ It never follows, stars or changes anything on your account; "Follow on GitHub" 
 
 ## Turning it on
 
-Add a `[follow]` table to `watchlist.toml`:
+Add a `[follow]` table to `watchlist.toml`, above the `# People to follow.` line (the Worker's settings page rewrites everything below it):
 
 ```toml
 [follow]
