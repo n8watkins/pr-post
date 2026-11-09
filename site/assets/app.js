@@ -61,6 +61,19 @@
   const linked = location.hash.startsWith("#on-") && $(`.sp[aria-controls="${CSS.escape("day-" + location.hash.slice(4))}"]`);
   if (linked) openDay(linked, false);
 
+  // ----- a jump link to a folded section or a Who to follow card opens it -----
+  const openTarget = () => {
+    const id = decodeURIComponent(location.hash.slice(1));
+    const el = id && document.getElementById(id);
+    if (!el) return;
+    const details = el.matches("details") ? el : el.querySelector("details.fc-report, details.rsect");
+    if (details) details.open = true;
+    const outer = el.parentElement && el.parentElement.closest("details");
+    if (outer) { outer.open = true; el.scrollIntoView(); }
+  };
+  openTarget();
+  window.addEventListener("hashchange", openTarget);
+
   // ----- who to follow: "Add to PR Post" copies the one-liner that drafts the entry -----
   $$("[data-copy]").forEach((btn) => {
     btn.addEventListener("click", async () => {

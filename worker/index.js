@@ -7,8 +7,11 @@
 //      (the browser's prompt names SITE_TITLE, default "pr-post").
 //   3. Neither configured: the site refuses to serve.
 // /api/watchlist lets the settings page commit watchlist.toml via GitHub.
+// /act/<token> is the one exception to sign-in: the one-click links in the Who
+// to follow email (scripts/act_lib.py). The signed, expiring token is the
+// credential, a GET only shows a page, and only that page's POST acts.
 
-import { decodeJwt, checkClaims, validatePeople, replacePeople, realm } from "./lib.js";
+import { decodeJwt, checkClaims, validatePeople, replacePeople, realm, verifyAction, signAction, UNDO } from "./lib.js";
 
 const SECURITY_HEADERS = {
   "X-Robots-Tag": "noindex, nofollow",
@@ -142,8 +145,133 @@ async function saveWatchlist(request, env, user) {
   return json(200, { ok: true });
 }
 
+
+// ---------- one-click actions from the Who to follow email ----------
+
+const ACT_PATH = /^\/act\/([A-Za-z0-9_-]{8,320}\.[A-Za-z0-9_-]{20,90})\/?$/;
+const ACT_SCRIPT = "if(!navigator.webdriver){setTimeout(function(){var f=document.getElementById('act');if(f&&!f.dataset.sent){f.dataset.sent='1';f.submit();}},500);}"
+  + "document.addEventListener('submit',function(e){var b=e.target.querySelector('button');if(b){b.disabled=true;b.textContent='Working...';}});";
+let actScriptHash;
+async function scriptHash() {
+  if (!actScriptHash) {
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(ACT_SCRIPT)));
+    actScriptHash = btoa(String.fromCharCode(...digest));
+  }
+  return actScriptHash;
+}
+
+const WORDS = {
+  follow: { ask: (l) => `Follow @${l} on GitHub?`, go: "Follow", done: (l) => `Followed @${l} ✓`, note: "GitHub applies it within a minute." },
+  unfollow: { ask: (l) => `Unfollow @${l} on GitHub?`, go: "Unfollow", done: (l) => `Unfollowed @${l} ✓`, note: "GitHub applies it within a minute." },
+  add: { ask: (l) => `Add @${l} to the paper?`, go: "Add to PR Post", done: (l) => `Adding @${l} ✓`,
+    note: "A pull request with their draft watch-list entry and profile opens within a minute or two. Nothing changes until you merge it." },
+  unadd: { ask: (l) => `Remove the draft for @${l}?`, go: "Remove the draft", done: (l) => `Removed the draft for @${l} ✓`,
+    note: "Its pull request closes and its branch is deleted within a minute. A draft you already merged stays; remove them from the settings page." },
+};
+
+const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+async function actPage(env, status, title, body, { script = false } = {}) {
+  const csp = ["default-src 'none'", "style-src 'unsafe-inline'", "img-src https://avatars.githubusercontent.com", "form-action 'self'",
+    "base-uri 'none'", "frame-ancestors 'none'", script ? `script-src 'sha256-${await scriptHash()}'` : "script-src 'none'"].join("; ");
+  const paper = escHtml(env.SITE_TITLE || "pr-post");
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer"><title>${escHtml(title)} · ${paper}</title>
+<style>
+:root{--bg:#e9e8e3;--sheet:#f8f7f3;--ink:#17171a;--soft:#46464c;--rule:#cfcdc5;--extra:#c4161c;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--bg:#0f0f11;--sheet:#18181c;--ink:#ecebe6;--soft:#c4c3c9;--rule:#34343a;--extra:#ff5459}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+main{max-width:520px;margin:9vh auto;padding:26px 24px 22px;background:var(--sheet);border:1px solid var(--rule)}
+.k{font:700 17px Georgia,serif;border-bottom:3px double var(--ink);padding-bottom:10px;margin-bottom:18px}
+h1{font:700 28px/1.2 Georgia,serif;margin:0 0 10px;overflow-wrap:anywhere}p{margin:0 0 14px;color:var(--soft)}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:18px}
+button,.btn{font:700 16px/1 inherit;font-family:inherit;padding:13px 20px;border:1.5px solid var(--ink);background:var(--ink);color:var(--sheet);border-radius:6px;cursor:pointer;text-decoration:none}
+.btn.ghost{background:transparent;color:var(--ink)}button:disabled{opacity:.6;cursor:default}
+a{color:inherit;text-decoration-color:var(--extra);text-underline-offset:3px}
+@media (max-width:560px){main{margin:0;border:0;min-height:100vh}}
+</style></head><body><main><div class="k">${paper}</div>${body}</main>${script ? `<script>${ACT_SCRIPT}</script>` : ""}</body></html>`;
+  return new Response(html, { status, headers: {
+    "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Content-Security-Policy": csp,
+    "X-Robots-Tag": "noindex, nofollow", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer",
+  } });
+}
+
+async function actionsApi(env, path, init = {}) {
+  return fetch(`https://api.github.com/repos/${env.GITHUB_REPO}/${path}`, {
+    ...init,
+    headers: { Authorization: `Bearer ${env.ACTIONS_TOKEN}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "pull-request-post", ...(init.headers || {}) },
+  });
+}
+
+/** Why this action cannot run yet, as page text, or null when it is set up. */
+async function notReady(env, action) {
+  if (!env.ACTIONS_TOKEN || !env.GITHUB_REPO) return "One-click actions aren't set up yet: the Worker has no ACTIONS_TOKEN to start the workflow. The setup steps are in SETUP.md under one-click actions.";
+  if (action === "follow" || action === "unfollow") {
+    const r = await actionsApi(env, "actions/secrets/FOLLOW_GITHUB_TOKEN");
+    if (r.status === 404) return "Follow isn't set up yet: the FOLLOW_GITHUB_TOKEN secret is missing, so nothing was followed. The setup steps are in SETUP.md under one-click actions; this link keeps working until it expires.";
+    if (!r.ok) return `Could not check the setup with GitHub (${r.status}). Nothing was done; try again in a minute.`;
+  }
+  return null;
+}
+
+/** True when the paper's action log already has this link's nonce (the act workflow refuses it too). */
+async function alreadyUsed(env, nonce) {
+  const r = await actionsApi(env, "contents/follow/actions.jsonl?ref=main", { headers: { Accept: "application/vnd.github.raw+json" } });
+  if (!r.ok) return false;
+  return (await r.text()).includes(`"nonce":"${nonce}"`);
+}
+
+async function handleAct(request, env, url) {
+  const m = url.pathname.match(ACT_PATH);
+  if (!m) return actPage(env, 404, "Not a link", "<h1>That link isn't valid</h1><p>Open the button from the email again.</p>");
+  if (!env.ACTION_SIGNING_KEY) return actPage(env, 503, "Not set up", "<h1>One-click actions aren't set up yet</h1><p>The Worker has no ACTION_SIGNING_KEY. The setup steps are in SETUP.md under one-click actions.</p>");
+  if (request.method !== "GET" && request.method !== "POST") return actPage(env, 405, "Not allowed", "<h1>Not allowed</h1>");
+  let p;
+  try {
+    p = await verifyAction(env.ACTION_SIGNING_KEY, m[1]);
+  } catch (err) {
+    const expired = err.message === "expired";
+    return actPage(env, expired ? 410 : 400, expired ? "Expired" : "Not valid",
+      expired ? "<h1>This link has expired</h1><p>Links in the email work for seven days. Use the Who to follow page on the site instead.</p>"
+        : "<h1>That link isn't valid</h1><p>Open the button from the email again.</p>");
+  }
+  const w = WORDS[p.a];
+  const login = escHtml(p.l);
+  const why = await notReady(env, p.a);
+  if (why) return actPage(env, 503, "Not set up", `<h1>${p.a.includes("follow") ? "Follow isn't set up yet" : "Not set up yet"}</h1><p>${escHtml(why)}</p>`);
+  if (await alreadyUsed(env, p.n)) {
+    return actPage(env, 409, "Already used", `<h1>This link was already used</h1><p>${escHtml(w.done(p.l))} earlier. Each link works once.</p>`);
+  }
+
+  if (request.method === "GET") {
+    // A bare GET never acts: email scanners open every link. The page acts through a POST.
+    return actPage(env, 200, w.ask(p.l), `<h1>${escHtml(w.ask(p.l))}</h1><p>Doing it now. If nothing happens, press the button.</p>
+<form id="act" method="post"><div class="row"><button type="submit">${escHtml(w.go)}</button><a class="btn ghost" href="https://github.com/${login}">GitHub profile</a></div></form>`, { script: true });
+  }
+
+  const origin = request.headers.get("Origin");
+  if (!origin || origin === "null" || new URL(origin).host !== url.host) {
+    return actPage(env, 403, "Not allowed", "<h1>Not allowed</h1><p>Use the button on this site's own page.</p>");
+  }
+  const r = await actionsApi(env, "actions/workflows/act.yml/dispatches", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ref: "main", inputs: { token: m[1] } }),
+  });
+  if (!r.ok) {
+    console.error(`act dispatch failed: ${r.status}`);
+    return actPage(env, 502, "Failed", `<h1>That didn't work</h1><p>GitHub refused to start the workflow (${r.status}). Nothing was done.</p>`);
+  }
+  console.log(`act: ${p.a} ${p.l}`);
+  const undo = UNDO[p.a] ? `<a class="btn ghost" href="/act/${await signAction(env.ACTION_SIGNING_KEY, UNDO[p.a], p.l)}">Undo</a>` : "";
+  return actPage(env, 200, w.done(p.l), `<h1>${escHtml(w.done(p.l))}</h1><p>${escHtml(w.note)}</p>
+<div class="row">${undo}<a class="btn ghost" href="https://github.com/${login}">GitHub profile</a></div>
+<p style="margin-top:18px;font-size:14px">Every action is logged in the paper. <a href="https://github.com/${escHtml(env.GITHUB_REPO)}/actions/workflows/act.yml">See the runs</a></p>`);
+}
+
 export default {
   async fetch(request, env) {
+    const path = new URL(request.url).pathname;
+    if (path === "/act" || path.startsWith("/act/")) return handleAct(request, env, new URL(request.url));
     const auth = await authorize(request, env);
     if (auth.response) return auth.response;
     const url = new URL(request.url);

@@ -109,5 +109,8 @@ To test the email without sending it, run `send_email.py --dry-run --preview dig
 | `SITE_PASSWORD` | Worker secret | Sign-in until Access is on |
 | `GITHUB_TOKEN` | Worker secret | Saving from the settings page |
 | `CLOUDFLARE_API_TOKEN` | Your machine or a repository secret | Deploying |
+| `ACTION_SIGNING_KEY` | Worker secret and repository secret (same value) | Optional one-click links in the Who to follow email ([who-to-follow.md](who-to-follow.md)) |
+| `ACTIONS_TOKEN` | Worker secret | Starting the paper's `act.yml` workflow from those links |
+| `FOLLOW_GITHUB_TOKEN` | Repository secret | Following and unfollowing from those links (Followers: read and write only) |
 
 Never commit keys; `.env` files are ignored.

@@ -357,3 +357,34 @@ footer.colophon { max-width: 1120px; margin: 22px auto 0; font-family: var(--mon
   .fc-bar { grid-column: 1 / -1; grid-row: 2; }
   .fc-pw { grid-column: 1 / -1; }
 }
+
+/* ---------- issue pages (/r/<date>-<kind>/) and tables of contents ---------- */
+.tldr { border-top: 3px double var(--ink); border-bottom: 1px solid var(--ink); padding: 2px 0 6px; margin: 0 0 8px; }
+.tldr .sect { margin: 16px 0 8px; }
+.tldr ul { margin: 0 0 10px; padding-left: 22px; font-size: 20px; line-height: 1.5; }
+.tldr li { margin-bottom: 8px; text-wrap: pretty; }
+.toc .sect { margin: 30px 0 10px; }
+.toc ol { list-style: none; margin: 0; padding: 0; border-top: 2px solid var(--ink); columns: 2 300px; column-gap: 32px; }
+.toc li { break-inside: avoid; padding: 9px 0; border-bottom: 1px solid var(--rule); display: grid; gap: 1px; }
+.toc a { font-family: var(--display); font-weight: 800; font-size: 20px; line-height: 1.2; text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+.toc-line { font-size: 16px; line-height: 1.4; color: var(--ink-soft); text-wrap: pretty; }
+.issue-people { max-width: 860px; }
+.issue-person { scroll-margin-top: 16px; border-top: 3px double var(--ink); margin: 46px 0 0; padding-top: 10px; }
+.issue-person:target .ip-head h2 { text-decoration: underline; text-decoration-color: var(--extra); text-decoration-thickness: 3px; text-underline-offset: 6px; }
+.ip-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; margin: 0 0 8px; }
+.ip-head h2 { font-family: var(--display); font-weight: 900; font-size: 34px; line-height: 1.1; margin: 0; }
+.ip-head h2 a { text-decoration: none; }
+.ip-head .label a { text-decoration: none; }
+.rsect { border-top: 1px solid var(--rule); }
+.rsect > summary { cursor: pointer; list-style: none; display: flex; align-items: baseline; gap: 10px; padding: 12px 0; font-family: var(--display); font-weight: 800; font-size: 22px; line-height: 1.25; }
+.rsect > summary::-webkit-details-marker { display: none; }
+.rsect > summary::before { content: "+"; font-family: var(--mono); font-weight: 700; font-size: 16px; color: var(--extra); width: 14px; flex: none; }
+.rsect[open] > summary::before { content: "\2212"; }
+.rsect > summary:focus-visible { outline: 2px solid var(--extra); outline-offset: 2px; }
+.rsect > .prose { padding: 0 0 8px 24px; }
+@media (max-width: 600px) {
+  .ip-head h2 { font-size: 28px; }
+  .tldr ul { font-size: 18px; }
+  .rsect > .prose { padding-left: 0; }
+}
