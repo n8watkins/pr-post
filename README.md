@@ -129,7 +129,7 @@ See **[docs/writers.md](docs/writers.md)**.
   A public site never prints them either; only a private site that opts in with `show_private_counts` does.
 - Nothing is committed back by the demo workflow: collected data stays in the Actions cache and only the built site is published.
 - For a paper only you and friends can read, see **[docs/private-mode.md](docs/private-mode.md)**.
-  It also shows how to keep that paper in its own private repository and run this engine from it at a pinned release.
+  It also shows how to keep everything private out of git, in Cloudflare D1 and R2 behind the same sign-in, or in a private repository of its own.
 
 ## How it is built
 
@@ -149,7 +149,9 @@ See **[docs/writers.md](docs/writers.md)**.
 | `scripts/research_person.py` | Drafts a watch list entry and profile for someone new, for review |
 | `scripts/follow.py`, `scripts/follow_lib.py` | Optional "Who to follow": candidates, mini reports, fit scores and weekly picks |
 | `site/assets/` | The newspaper's CSS and JavaScript |
-| `worker/` | Optional Cloudflare Worker for private mode |
+| `worker/` | Optional Cloudflare Worker for private mode; `worker/store.js` keeps a private paper in D1 and R2 |
+| `scripts/store.py` | Pulls a private paper from that storage into a folder and pushes back what changed |
+| `paper/` | The owner's private paper: its Worker config and D1 migrations (its content lives in Cloudflare, not here) |
 | `demo/watchlist.toml` | The demo paper |
 | `.github/workflows/demo.yml` | Collect, build, check and deploy to Pages on Wednesdays and Saturdays |
 | `.github/workflows/test.yml` | Tests on every push and pull request |
