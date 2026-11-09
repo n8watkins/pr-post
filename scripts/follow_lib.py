@@ -33,12 +33,15 @@ PHONE_RE = re.compile(r"(?<!\w)\+?\d[\d ().-]{7,}\d(?!\w)")
 CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f​-‏‪-‮⁦-⁩]")
 
 
+EM_DASH, EN_DASH = chr(0x2014), chr(0x2013)
+
+
 def clean(text, limit=300):
     """Text safe to keep and print: no email addresses, phone numbers, control characters or em dashes."""
     text = CONTROL_RE.sub("", str(text or ""))
     text = EMAIL_RE.sub("", text)
     text = PHONE_RE.sub("", text)
-    text = text.replace("—", " - ").replace("–", "-")
+    text = text.replace(EM_DASH, " - ").replace(EN_DASH, "-")
     text = re.sub(r"\s+", " ", text).strip(" ,;|-")
     if len(text) > limit:
         text = text[: limit - 1].rsplit(" ", 1)[0].rstrip(" ,;:-") + "..."
