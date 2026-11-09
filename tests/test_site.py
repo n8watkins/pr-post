@@ -112,8 +112,8 @@ class EmailRun(unittest.TestCase):
         preview = self.repo / "digest.html"
         out = self.run_main("--dry-run", "--preview", str(preview), env={"RESEND_API_KEY": "re_test_not_a_key"})
         self.assertIn("Dry run", out)
-        self.assertIn("Weekly report: Octo Cat: Oct 25 to Oct 31", out)
-        self.assertIn("RESEND_API_KEY is set", out)
+        self.assertIn("through Resend (RESEND_API_KEY set)", out)
+        self.assertNotIn("Octo Cat", out)  # subjects name people; dry runs can land in public Actions logs
         self.assertNotIn("re_test_not_a_key", out)
         self.assertNotIn("reader@example.com", out)
         page = preview.read_text()
@@ -127,6 +127,17 @@ class EmailRun(unittest.TestCase):
         argv = ["send_email.py", "--paper", str(self.repo), str(self.report), str(other), "--dry-run"]
         with mock.patch.object(sys, "argv", argv), self.assertRaises(SystemExit):
             send_email.main()
+
+    def test_ses_dry_run_and_a_suppressed_recipient(self):
+        text = (self.repo / "watchlist.toml").read_text().replace('to = "reader@example.com"', 'to = "reader@example.com"\nvia = "ses"\nconfiguration_set = "pr-post"')
+        (self.repo / "watchlist.toml").write_text(text)
+        out = self.run_main("--dry-run", env={"AWS_ACCESS_KEY_ID": "AKIDEXAMPLE", "AWS_SECRET_ACCESS_KEY": "not-a-secret"})
+        self.assertIn("through Amazon SES (AWS credentials set)", out)
+        self.assertNotIn("AKIDEXAMPLE", out)
+        (self.repo / "suppressed.json").write_text('[{"address": "Reader@Example.com", "reason": "Permanent bounce", "at": "2026-11-09T10:00:00Z"}]')
+        with self.assertRaises(SystemExit) as stop:
+            self.run_main("--dry-run", env={"AWS_ACCESS_KEY_ID": "AKIDEXAMPLE", "AWS_SECRET_ACCESS_KEY": "not-a-secret"})
+        self.assertIn("Permanent bounce on 2026-11-09", str(stop.exception))
 
     def test_dry_run_still_respects_email_being_off(self):
         text = (self.repo / "watchlist.toml").read_text().replace("email = true", "email = false")

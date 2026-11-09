@@ -9,9 +9,11 @@
 // only what changed.
 //
 // D1 holds structured data: the watch list (people, settings), profiles, the
-// Who to follow state and the one-click action log. The client turns them back
-// into watchlist.toml, profiles/<id>.md, follow/state.json and
-// follow/actions.jsonl, so the engine's scripts work on a plain folder.
+// Who to follow state, the one-click action log, the reports already emailed
+// and SES's bounces and complaints. The client turns them back into
+// watchlist.toml, profiles/<id>.md, follow/state.json, follow/actions.jsonl,
+// emailed.json and suppressed.json, so the engine's scripts work on a plain
+// folder.
 //
 // Who may do what:
 //   owner  (signed in through the site)  read everything; write the watch list
@@ -21,6 +23,8 @@
 //          editions/, and add to the end of a profile
 // Each bulk write is one SQL statement (json_each), so a request stays far
 // below the Workers free plan's per-request query limit.
+
+import { suppressedList } from "./sns.js";
 
 export const PATH_RE = /^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$/;
 const LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
@@ -231,6 +235,25 @@ async function logAction(request, env) {
   return reply(200, { ok: true });
 }
 
+// ---------- email: what was sent, and who must not get more ----------
+
+async function readEmailed(env) {
+  const rows = await env.DB.prepare("SELECT item FROM emails_sent ORDER BY item").all();
+  return rows.results.map((r) => r.item);
+}
+
+async function markEmailed(request, env) {
+  let body;
+  try { body = await readJson(request); } catch (err) { return reply(400, { error: err.message }); }
+  const items = body && body.items;
+  if (!Array.isArray(items) || items.length > 500 || !items.every((i) => typeof i === "string" && PATH_RE.test(i) && i.startsWith("reports/"))) {
+    return reply(400, { error: "Expected {items: [report paths]}." });
+  }
+  await env.DB.prepare("INSERT INTO emails_sent (item, sent_at) SELECT value, ?2 FROM json_each(?1) WHERE true ON CONFLICT (item) DO NOTHING")
+    .bind(JSON.stringify(items), now()).run();
+  return reply(200, { ok: true });
+}
+
 // ---------- the router ----------
 
 function sameOrigin(request, url) {
@@ -301,6 +324,17 @@ export async function handleStore(request, env, url, role) {
     if (m === "GET") return new Response(await readActions(env), { headers: { "Content-Type": "application/x-ndjson" } });
     if (m === "POST" && role === "jobs") return logAction(request, env);
     return reply(405, { error: "Not allowed." });
+  }
+
+  if (p === "/api/paper/emailed") {
+    if (role === "writer") return reply(403, { error: "Not allowed." });
+    if (m === "GET") return reply(200, { items: await readEmailed(env) });
+    if (m === "POST" && role === "jobs") return markEmailed(request, env);
+    return reply(405, { error: "Not allowed." });
+  }
+  if (p === "/api/paper/suppressed" && m === "GET") {
+    if (role === "writer") return reply(403, { error: "Not allowed." });
+    return reply(200, { suppressed: await suppressedList(env) });
   }
 
   return reply(404, { error: "Not found." });

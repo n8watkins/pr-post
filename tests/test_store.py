@@ -127,8 +127,15 @@ class EndToEndTest(unittest.TestCase):
         store.push(api, work, say=self.say)
         self.assertEqual(self.said[-1], "Pushed 0 files, 0 profiles, 1 follow candidates (1 removed), 0 logged actions.")
 
+        self.assertEqual(json.loads((work / "emailed.json").read_text()), [])
+        self.assertEqual(json.loads((work / "suppressed.json").read_text()), [])
+        (work / "emailed.json").write_text(json.dumps(["reports/ada/2026-11-09-weekly.md"]))
+        store.push(api, work, say=self.say)
+        self.assertEqual(self.said[-1], "Pushed 0 files, 0 profiles, 0 follow candidates (0 removed), 0 logged actions, 1 emailed reports.")
+
         fresh = self.root / "fresh"
         store.pull(api, fresh, say=self.say)
+        self.assertEqual(json.loads((fresh / "emailed.json").read_text()), ["reports/ada/2026-11-09-weekly.md"])
         self.assertEqual((fresh / "data" / "ada.json").read_text(), '{"n": 1}')
         self.assertEqual((fresh / "profiles" / "ada.md").read_text(), "# Ada\n- more\n")
         self.assertEqual(json.loads((fresh / "follow" / "state.json").read_text()), {"version": 1, "people": {"zed": {"status": "suggested"}}})

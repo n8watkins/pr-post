@@ -34,6 +34,8 @@ jobs:
           python3 scripts/stats.py --paper "$RUNNER_TEMP/paper"
           python3 scripts/build_site.py --paper "$RUNNER_TEMP/paper" --out "$RUNNER_TEMP/dist"
           python3 scripts/feed.py --check "$RUNNER_TEMP/dist/feed.json"
+      - name: Lint the SES CloudFormation template
+        run: pipx run cfn-lint==1.60.0 paper/aws/ses.yml
       - name: No em dashes
         run: |
           if git grep -nP '\x{2014}' -- .; then
