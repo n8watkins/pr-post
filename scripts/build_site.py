@@ -24,6 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config  # noqa: E402
 import feed as feedlib  # noqa: E402
+import follow_lib  # noqa: E402
 from md import blocks, safe_url  # noqa: E402
 
 ROOT = config.ROOT
@@ -40,6 +41,7 @@ SITE = dict(config.SITE_DEFAULTS)
 PAPER = SITE["title"]
 BASE = ""
 SHOW_PRIVATE = False
+HAS_FOLLOW = False  # set by build() when there is a "Who to follow" page
 
 
 def configure(site):
@@ -346,6 +348,8 @@ def rail(people, snaps, current=None, page=None):
     if rest:
         groups += f'<div class="rail-group"><h2>{"Following" if starred else "People"}</h2>{"".join(link(p) for p in rest)}</div>'
     pages = [("front", "/", "Front page"), ("archive", "/archive/", "Back issues")]
+    if HAS_FOLLOW:
+        pages.append(("follow", "/follow/", "Who to follow"))
     if SITE["mode"] == "private":
         pages.append(("settings", "/settings/", "People and settings"))
     nav = "".join(f'<a href="{u(href)}"{" aria-current=\"page\"" if page == key else ""}>{label}</a>' for key, href, label in pages)
@@ -766,6 +770,61 @@ def settings_page(people):
 <script type="application/json" id="watchlist-data">{data}</script>"""
 
 
+# ---------- who to follow ----------
+
+PART_LABELS = {"stack": "Stack overlap", "activity": "Activity", "quality": "Quality", "relevance": "Your interests", "network": "Your network"}
+
+
+def follow_card(c, report, repo_url):
+    login = c["login"]
+    rec = c["recommendation"].lower()
+    avatar = c.get("avatar") or report.get("avatar")
+    avatar_html = f'<img class="fc-avatar" src="{esc(safe_url(avatar))}" alt="" width="56" height="56" loading="lazy">' if avatar and config.is_http_url(avatar) else ""
+    parts = "".join(
+        f'<div class="fc-part"><span class="fc-pl">{esc(PART_LABELS.get(k, k))}</span>'
+        f'<span class="fc-bar" aria-hidden="true"><span style="width:{round(100 * p["points"] / p["max"]) if p["max"] else 0}%"></span></span>'
+        f'<span class="fc-pts num">{round(p["points"])}/{p["max"]:g}</span><span class="fc-pw">{esc(p["why"])}</span></div>'
+        for k, p in c["parts"].items()
+    )
+    found = "".join(f"<li>{ext(f['url'], esc(f['text']))}</li>" for f in c.get("found", [])[:6])
+    cmd = follow_lib.add_command(repo_url, login)
+    add_href = follow_lib.add_url(repo_url)
+    add_link = f' or {ext(add_href, "run it from GitHub")} with their username' if add_href else ""
+    return f"""<article class="fcard" id="{esc(login.lower())}">
+  <div class="fc-head">{avatar_html}<div class="fc-id"><h2 class="fc-name">{ext(c["profile"], esc(c["name"]))}</h2><div class="label">@{esc(login)} · researched {day_short(c["researched"])}</div></div>
+  <div class="fc-score fc-{esc(rec)}" title="Fit score out of 100"><b class="num">{c["score"]}</b><span>{esc(c["recommendation"])}</span></div></div>
+  <p class="fc-why">{esc(c["why_follow"])}</p>
+  <div class="fc-parts">{parts}</div>
+  <div class="fc-actions">{ext(c["profile"], "Follow on GitHub", "btn solid")}<button class="btn" type="button" data-copy="{esc(cmd)}">Add to PR Post</button><span class="fc-copied label" role="status"></span></div>
+  <details class="fc-report"><summary>Mini report</summary>
+    <div class="prose">{render_md(follow_lib.render_md(report), demote=1)}</div>
+    {f'<div class="sect">How they turned up</div><ul class="fc-found">{found}</ul>' if found else ""}
+    <p class="fc-cmd">Add to PR Post drafts their watch-list entry and profile on a branch for you to review: <code>{esc(cmd)}</code>{add_link}.</p>
+  </details>
+</article>"""
+
+
+def follow_page(latest, reports, repo_url):
+    by_login = {c["login"]: c for c in latest["candidates"]}
+    picks = [by_login[x] for x in latest.get("picks", []) if x in by_login]
+    rest = [c for c in latest["candidates"] if c["login"] not in latest.get("picks", []) and c["recommendation"] != "Skip"]
+    skipped = [c for c in latest["candidates"] if c["login"] not in latest.get("picks", []) and c["recommendation"] == "Skip"]
+    card = lambda c: follow_card(c, reports[c["login"].lower()], repo_url)
+    picks_html = "".join(card(c) for c in picks) or '<p class="muted">No new picks this week: everyone worth suggesting was suggested in the last few weeks.</p>'
+    rest_html = f'<div class="sect">Also worth a look</div><div class="fgrid">{"".join(card(c) for c in rest)}</div>' if rest else ""
+    skip_html = (f'<details class="fc-skipped"><summary class="sect">Researched, but not a fit ({len(skipped)})</summary><div class="fgrid">{"".join(card(c) for c in skipped)}</div></details>'
+                 if skipped else "")
+    stack = ", ".join(latest.get("stack", [])[:8])
+    return f"""<div class="runhead"><span>{esc(PAPER)} · Who to follow</span><span>Updated {day_short(latest["date"])}</span></div>
+<h1 class="page-hed">Who to follow</h1>
+<p class="page-sub">Builders you do not follow yet, found through the people you read, the repos you build on and projects like yours. Each has a one-time mini report from public sources; every fact links to where it came from.</p>
+<div class="sect">This week's picks</div>
+<div class="fgrid">{picks_html}</div>
+{rest_html}
+{skip_html}
+<p class="facts-note">The fit score adds up five parts: how much of your stack they use ({esc(stack)}), how active they have been over 12 weeks, the quality and reach of their work, how many of your interests their work touches, and whether the builders you already read follow or work with them. Weights and thresholds live under [follow] in watchlist.toml. Nothing here follows anyone for you: Follow on GitHub only opens their profile.</p>"""
+
+
 # ---------- build ----------
 
 def build(paper, out):
@@ -782,6 +841,11 @@ def build(paper, out):
         f = out / path
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(text)
+
+    # "Who to follow" names people the owner does not follow yet, so it stays off public sites unless asked for.
+    global HAS_FOLLOW
+    follow_latest, follow_reports = follow_lib.load_latest(paper, cfg)
+    HAS_FOLLOW = bool(follow_latest and follow_latest["candidates"]) and (SITE["mode"] == "private" or cfg["follow"]["public_page"])
 
     order = ordered(people)
     stats = {p["id"]: latest_stats(snaps, p["id"]) for p in people}
@@ -810,6 +874,9 @@ def build(paper, out):
             write(f"p/{p['id']}/{stem}/index.html", layout(f"{report_title(md, stem)} · {PAPER}", sheet(report_page(p, stem, md)), order, snaps, current=p["id"]))
 
     write("archive/index.html", layout(f"Back issues · {PAPER}", sheet(archive_page(editions, order, reports)), order, snaps, page="archive"))
+    if HAS_FOLLOW:
+        write("follow/index.html", layout(f"Who to follow · {PAPER}", sheet(follow_page(follow_latest, follow_reports, cfg["links"].get("repo"))),
+                                          order, snaps, page="follow", description=f"Who to follow: builders suggested for {PAPER}."))
     if SITE["mode"] == "private":
         write("settings/index.html", layout(f"People and settings · {PAPER}", sheet(settings_page(people)), order, snaps, page="settings"))
     write("404.html", layout(f"Not found · {PAPER}", sheet(f'<h1 class="page-hed">Page not found</h1><p class="page-sub"><a href="{u("/")}">Back to the front page</a></p>'), order, snaps))

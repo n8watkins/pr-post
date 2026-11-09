@@ -7,6 +7,8 @@ Usage:
     python3 scripts/send_email.py [--paper DIR] <report.md> ... --dry-run            # every check, no send
 
 Several reports become one digest email with an "In this issue" summary.
+A weekly digest also gets the week's "Who to follow" picks when [follow] is on
+and follow.py ran in the last eight days (--follow on|off overrides that).
 
 Needs RESEND_API_KEY to send. Recipient and sender come from [email] in
 watchlist.toml, and sending must be turned on with email = true under
@@ -31,6 +33,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config  # noqa: E402
+import follow_lib  # noqa: E402
 from md import blocks, safe_url  # noqa: E402
 
 FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
@@ -157,7 +160,48 @@ def person_divider(n, total, name, span):
             f'<div style="font-size:14px;color:{MUTED}">{inline(span)}</div></td></tr>')
 
 
-def render(reports, kind, links, brand="PR Post"):
+REC_COLORS = {"Follow": ("#ffffff", ACCENT), "Maybe": (ACCENT, "#ece8ff"), "Skip": (MUTED, "#f1f0f4")}
+
+
+def follow_section(latest, reports, site_url, repo_url, limit=5):
+    """The "Who to follow" card: this week's picks, each with its score, why, and the two actions."""
+    by_login = {c["login"]: c for c in latest["candidates"]}
+    picks = [by_login[x] for x in latest.get("picks", []) if x in by_login][:limit]
+    if not picks:
+        return ""
+    rows = []
+    add_url = follow_lib.add_url(repo_url)
+    for c in picks:
+        rep = reports[c["login"].lower()]
+        fg, bg = REC_COLORS.get(c["recommendation"], REC_COLORS["Maybe"])
+        fact = follow_lib.headline_fact(rep)
+        page = f"{site_url}/follow/#{c['login'].lower()}" if site_url else None
+        actions = [f'<a href="{html.escape(safe_url(c["profile"]))}" style="color:{ACCENT};font-weight:700;text-decoration:none">Follow on GitHub</a>']
+        if page:
+            actions.append(f'<a href="{html.escape(safe_url(page))}" style="color:{ACCENT};font-weight:700;text-decoration:none">Mini report</a>')
+        if add_url:
+            actions.append(f'<a href="{html.escape(safe_url(add_url))}" style="color:{ACCENT};font-weight:700;text-decoration:none">Add to PR Post</a>')
+        avatar = c.get("avatar")
+        img = (f'<img src="{html.escape(safe_url(avatar))}" width="44" height="44" alt="" style="display:block;border-radius:50%;border:1px solid {LINE}">'
+               if avatar and config.is_http_url(avatar) else "")
+        rows.append(
+            f'<tr><td valign="top" style="padding:12px 12px 12px 0;border-top:1px solid {LINE};width:44px">{img}</td>'
+            f'<td valign="top" style="padding:12px 0;border-top:1px solid {LINE}">'
+            f'<div style="font-size:16px;font-weight:800;color:{INK}">{html.escape(c["name"])} <span style="font-weight:400;color:{MUTED};font-size:13px">@{html.escape(c["login"])}</span></div>'
+            + (f'<div style="font-size:13px;color:{MUTED};margin:2px 0 0">{html.escape(fact)}</div>' if fact else "")
+            + f'<div style="font-size:14px;line-height:1.5;color:{INK};margin:6px 0">{html.escape(c["why_follow"])}</div>'
+            f'<div style="font-size:13px">{" &nbsp;&middot;&nbsp; ".join(actions)}</div></td>'
+            f'<td valign="top" align="right" style="padding:12px 0 12px 12px;border-top:1px solid {LINE};white-space:nowrap">'
+            f'<div style="font-size:24px;font-weight:800;color:{INK};line-height:1">{c["score"]}</div>'
+            f'<div style="display:inline-block;margin-top:4px;font-size:10px;font-weight:800;letter-spacing:.1em;color:{fg};background:{bg};border-radius:999px;padding:3px 8px">{html.escape(c["recommendation"].upper())}</div></td></tr>'
+        )
+    intro = (f'<p style="margin:0 0 10px;font-size:14px;line-height:1.55;color:{MUTED}">Builders you do not follow yet, scored 0 to 100 for fit with your stack and interests. '
+             f'Nothing is followed for you: the link only opens their profile.</p>')
+    body = f'{intro}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 12px">{"".join(rows)}</table>'
+    return card("Who to follow", body)
+
+
+def render(reports, kind, links, brand="PR Post", extra_rows=""):
     """reports: [(markdown, fallback title)] in display order."""
     people = [person_cards(md, fb) for md, fb in reports]
     label, c1, c2 = KINDS.get(kind, KINDS["weekly"])
@@ -201,6 +245,7 @@ def render(reports, kind, links, brand="PR Post"):
   </td></tr></table>
 </td></tr>
 {rows}
+{extra_rows}
 <tr><td align="center" style="padding:10px 12px 0;font-size:12px;line-height:1.7;color:{MUTED}">
   {footer_links}<br>
   To stop these emails, set <code style="font-family:{MONO}">email = false</code> in watchlist.toml.
@@ -238,6 +283,8 @@ def main():
     ap.add_argument("--subject", help="default: built from the report titles")
     ap.add_argument("--preview", metavar="FILE", help="write the HTML here instead of sending")
     ap.add_argument("--dry-run", action="store_true", help="run every check a real send would, print the subject, but never send")
+    ap.add_argument("--follow", choices=("auto", "on", "off"), default="auto",
+                    help='"Who to follow" picks: auto adds them to weekly digests only (default)')
     args = ap.parse_args()
 
     paper = config.paper_dir(args.paper)
@@ -261,7 +308,17 @@ def main():
         ("Read on GitHub", github),
         ("Read the paper", watch["site"]["url"] or None),
     ] + [(label.replace("_", " ").title(), url) for label, url in link_cfg.items() if label != "repo" and isinstance(url, str)]
-    page = render(reports, kind, links, watch["site"]["title"])
+    follow_html, follow_text = "", ""
+    if args.follow == "on" or (args.follow == "auto" and kind == "weekly"):
+        if watch["follow"]["enabled"] and watch["follow"]["email"]:
+            latest, follow_reports = follow_lib.load_latest(paper, watch, max_age_days=8)
+            if latest:
+                follow_html = follow_section(latest, follow_reports, watch["site"]["url"], repo, watch["follow"]["picks"])
+                picks = [c for x in latest.get("picks", [])[: watch["follow"]["picks"]] for c in latest["candidates"] if c["login"] == x]
+                if picks:
+                    follow_text = "\n\n---\n\nWho to follow\n\n" + "\n".join(
+                        f"- {c['name']} (@{c['login']}), {c['score']}/100 {c['recommendation']}: {c['why_follow']} {c['profile']}" for c in picks)
+    page = render(reports, kind, links, watch["site"]["title"], follow_html)
 
     if args.preview:
         Path(args.preview).write_text(page)
@@ -290,7 +347,7 @@ def main():
         "to": [cfg["to"]],
         "subject": subject,
         "html": page,
-        "text": "\n\n---\n\n".join(md for md, _ in reports),
+        "text": "\n\n---\n\n".join(md for md, _ in reports) + follow_text,
     }
     req = urllib.request.Request(
         "https://api.resend.com/emails",

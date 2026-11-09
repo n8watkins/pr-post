@@ -61,6 +61,21 @@
   const linked = location.hash.startsWith("#on-") && $(`.sp[aria-controls="${CSS.escape("day-" + location.hash.slice(4))}"]`);
   if (linked) openDay(linked, false);
 
+  // ----- who to follow: "Add to PR Post" copies the one-liner that drafts the entry -----
+  $$("[data-copy]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const note = btn.parentElement.querySelector(".fc-copied");
+      try {
+        await navigator.clipboard.writeText(btn.dataset.copy);
+        if (note) note.textContent = "Command copied. Run it to draft a pull request.";
+      } catch {
+        const details = btn.closest(".fcard")?.querySelector(".fc-report");
+        if (details) details.open = true;
+        if (note) note.textContent = "Copy the command from the mini report.";
+      }
+    });
+  });
+
   // ----- settings -----
   const list = $("#set-list");
   if (!list) return;
