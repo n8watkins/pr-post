@@ -1,4 +1,4 @@
-"""Shared parts of the emails: a short, robust HTML shell and the Resend call.
+"""Shared parts of the emails: a short, robust HTML shell and sending, through Amazon SES or Resend.
 
 Email clients are the hard part. The rules this module follows:
 
@@ -20,10 +20,12 @@ The look follows the web edition: ink on newsprint, a red accent, serif heads.
 
 import html
 import json
-import re
+import os
 import urllib.error
 import urllib.request
+from pathlib import Path
 
+import ses
 from md import safe_url
 
 SERIF = "Georgia,'Times New Roman',serif"
@@ -158,12 +160,58 @@ def send(key, sender, to, subject, page, text):
         raise SystemExit(f"Resend refused the email ({e.code}): {e.read().decode()[:500]}") from None
 
 
-def check_delivery(watch, key, dry_run):
+def transport(watch):
+    """How this paper sends: ("ses", credentials or None) or ("resend", key or None), from [email] via."""
+    if watch["email"]["via"] == "ses":
+        return "ses", ses.credentials()
+    return "resend", os.environ.get("RESEND_API_KEY") or None
+
+
+def describe(watch):
+    """A line for dry runs: which service, and whether its credentials are there. Never the values."""
+    via, creds = transport(watch)
+    what = "AWS credentials" if via == "ses" else "RESEND_API_KEY"
+    return f"{'Amazon SES' if via == 'ses' else 'Resend'} ({what} {'set' if creds else 'not set'})"
+
+
+def suppressed(paper, to):
+    """Why `to` must not get email (a hard bounce or a complaint recorded by SES), or None.
+
+    A private paper's storage writes suppressed.json next to watchlist.toml
+    (scripts/store.py); without it nothing is suppressed.
+    """
+    try:
+        entries = json.loads((Path(paper) / "suppressed.json").read_text())
+    except (OSError, ValueError):
+        return None
+    for e in entries if isinstance(entries, list) else []:
+        if isinstance(e, dict) and str(e.get("address", "")).lower() == to.lower():
+            return f"{e.get('reason') or 'suppressed'} on {str(e.get('at', ''))[:10] or 'an earlier send'}"
+    return None
+
+
+def check_delivery(watch, dry_run, paper=None):
     """The checks every send shares. Returns None to go ahead, else the message to print and stop with exit 0."""
     if not watch["delivery"].get("email"):
         return "Email is turned off in watchlist.toml; skipping."
     if not watch["email"].get("to"):
         raise SystemExit("Set [email] to in watchlist.toml before turning email on.")
-    if not key and not dry_run:
-        return "RESEND_API_KEY not set; skipping email."
+    if paper is not None and (why := suppressed(paper, watch["email"]["to"])):
+        # Sending again to an address that bounced or complained hurts the sender's reputation.
+        raise SystemExit(f"Not sending: the recipient is suppressed ({why}). Fix the address, then clear it on the site.")
+    via, creds = transport(watch)
+    if not creds and not dry_run:
+        return ("No AWS credentials; skipping email." if via == "ses" else "RESEND_API_KEY not set; skipping email.")
     return None
+
+
+def deliver(watch, subject, page, text):
+    """Send one email to [email] to through the paper's transport. Returns the provider's message id."""
+    cfg = watch["email"]
+    via, creds = transport(watch)
+    if via == "ses":
+        try:
+            return ses.send(cfg["from"], cfg["to"], subject, page, text, cfg["region"], cfg["configuration_set"], creds)
+        except ses.SesError as e:
+            raise SystemExit(str(e)) from None
+    return send(creds, cfg["from"], cfg["to"], subject, page, text)

@@ -2,7 +2,8 @@
 """Move a private paper between its Cloudflare storage and a working folder.
 
 A private paper served by the Worker keeps nothing in git: files live in R2 and
-the watch list, profiles, Who to follow state and action log live in D1
+the watch list, profiles, Who to follow state, action log, emailed reports and
+email suppressions live in D1
 (worker/store.js, docs/private-mode.md). The engine's scripts work on a plain
 folder, so a job pulls one, runs them, and pushes back what changed:
 
@@ -189,7 +190,7 @@ def load_snapshot(work):
 def pull(api, work, say=print):
     work = Path(work)
     work.mkdir(parents=True, exist_ok=True)
-    snap = {"files": {}, "profiles": {}, "follow": None, "actions": None}
+    snap = {"files": {}, "profiles": {}, "follow": None, "actions": None, "emailed": None}
 
     _, wl = api.json("GET", "/api/paper/watchlist")
     active = [p["entry"] for p in wl["people"] if p["status"] == "active"]
@@ -225,6 +226,15 @@ def pull(api, work, say=print):
         }
     elif status == 404:
         snap["follow"] = {"meta": {}, "people": {}}
+
+    status, raw = api.call("GET", "/api/paper/emailed", ok=(200, 403))
+    if status == 200:
+        items = json.loads(raw)["items"]
+        (work / "emailed.json").write_text(json.dumps(items, indent=1) + "\n")
+        snap["emailed"] = items
+    status, raw = api.call("GET", "/api/paper/suppressed", ok=(200, 403))
+    if status == 200:
+        (work / "suppressed.json").write_text(json.dumps(json.loads(raw)["suppressed"], indent=1) + "\n")
 
     status, raw = api.call("GET", "/api/paper/actions", ok=(200, 403))
     if status == 200:
@@ -325,6 +335,16 @@ def push_actions(api, work, snap):
     return sent
 
 
+def push_emailed(api, work, snap):
+    path = Path(work) / "emailed.json"
+    if snap.get("emailed") is None or not path.is_file():
+        return 0
+    new = [i for i in json.loads(path.read_text()) if i not in set(snap["emailed"])]
+    if new:
+        api.json("POST", "/api/paper/emailed", {"items": new})
+    return len(new)
+
+
 def push(api, work, dirs=PAPER_DIRS, delete=False, verbose=False, say=print):
     snap = load_snapshot(work)
     if not snap:
@@ -333,8 +353,9 @@ def push(api, work, dirs=PAPER_DIRS, delete=False, verbose=False, say=print):
     profiles = push_profiles(api, work, snap)
     follow, gone = push_follow(api, work, snap)
     actions = push_actions(api, work, snap)
+    emailed = push_emailed(api, work, snap)
     say(f"Pushed {files} files" + (f" (removed {removed})" if delete else "") + f", {profiles} profiles, "
-        f"{follow} follow candidates ({gone} removed), {actions} logged actions.")
+        f"{follow} follow candidates ({gone} removed), {actions} logged actions" + (f", {emailed} emailed reports" if emailed else "") + ".")
     # What was just pushed is the new baseline.
     new = pull_snapshot_after_push(work, snap)
     (Path(work) / SNAPSHOT).write_text(json.dumps(new))
@@ -350,6 +371,9 @@ def pull_snapshot_after_push(work, snap):
         state = json.loads(state_path.read_text())
         new["follow"] = {"meta": {k: canon(v) for k, v in state.items() if k != "people"},
                          "people": {login: sha256(canon(v).encode()) for login, v in state.get("people", {}).items()}}
+    emailed = work / "emailed.json"
+    if snap.get("emailed") is not None and emailed.is_file():
+        new["emailed"] = json.loads(emailed.read_text())
     log = work / "follow" / "actions.jsonl"
     if snap.get("actions") is not None and log.is_file():
         new["actions"] = [json.loads(line)["nonce"] for line in log.read_text().splitlines() if line.strip()]

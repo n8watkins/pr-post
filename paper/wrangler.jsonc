@@ -22,7 +22,9 @@
     "SITE_PREFIX": "site/",
     "GITHUB_REPO": "n8watkins/pr-post",
     "ACCESS_TEAM_DOMAIN": "",
-    "ACCESS_AUD": ""
+    "ACCESS_AUD": "",
+    // The SNS topic SES reports bounces and complaints to (the TopicArn output of paper/aws/ses.yml).
+    "SES_TOPIC_ARN": ""
   },
   "d1_databases": [
     { "binding": "DB", "database_name": "pr-post", "database_id": "2b4ca910-88b0-494b-a51d-a0c6da9a8869", "migrations_dir": "migrations" }
@@ -40,7 +42,8 @@
         "SITE_PREFIX": "site-next/",
         "GITHUB_REPO": "n8watkins/pr-post",
         "ACCESS_TEAM_DOMAIN": "",
-        "ACCESS_AUD": ""
+        "ACCESS_AUD": "",
+        "SES_TOPIC_ARN": ""
       },
       "d1_databases": [
         { "binding": "DB", "database_name": "pr-post", "database_id": "2b4ca910-88b0-494b-a51d-a0c6da9a8869", "migrations_dir": "migrations" }

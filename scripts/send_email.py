@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Email one issue of reports through Resend as a short digest.
+"""Email one issue of reports as a short digest, through Amazon SES or Resend.
 
 Usage:
     python3 scripts/send_email.py [--paper DIR] <paper>/reports/<id>/<date>-<kind>.md [more.md ...]
@@ -16,15 +16,16 @@ The TL;DR comes from the issue's edition (editions/<date>-<kind>.json): its
 "tldr" list, else its headlines, else the busiest people's first bullets.
 "Who to follow" has its own email (send_follow.py).
 
-Needs RESEND_API_KEY to send. Recipient and sender come from [email] in
-watchlist.toml, and sending must be turned on with email = true under
-[delivery]. Exits 0 with a message when email is turned off or no key is
-configured, so a run without email still succeeds. --dry-run runs every check
-a real send would and prints the subject, but never contacts Resend.
+Sends through [email] via in watchlist.toml: "ses" needs AWS credentials in
+the environment (docs/email.md), "resend" needs RESEND_API_KEY. Recipient and
+sender come from [email], and sending must be turned on with email = true
+under [delivery]. Exits 0 with a message when email is turned off or no
+credentials are configured, so a run without email still succeeds. A recipient
+that bounced or complained (suppressed.json, written by store.py) stops the
+send. --dry-run runs every check a real send would, but never sends.
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -161,17 +162,14 @@ def main():
         if not args.dry_run:
             return
 
-    key = os.environ.get("RESEND_API_KEY")
-    if stop := E.check_delivery(watch, key, args.dry_run):
+    if stop := E.check_delivery(watch, args.dry_run, paper):
         print(stop)
         return
-    cfg = watch["email"]
     if args.dry_run:
-        # Never print the recipient or the key: dry runs show up in Actions logs.
-        print(f"Dry run: would send {len(items)} report(s) as one email, subject {subject!r},"
-              f" from {cfg['from']!r}; RESEND_API_KEY is {'set' if key else 'not set'}. Nothing was sent.")
+        # Never print the recipient, the subject or any key: dry runs show up in Actions logs.
+        print(f"Dry run: would send {len(items)} report(s) as one email through {E.describe(watch)}. Nothing was sent.")
         return
-    print("Sent:", E.send(key, cfg["from"], cfg["to"], subject, page, text))
+    print("Sent:", E.deliver(watch, subject, page, text))
 
 
 if __name__ == "__main__":

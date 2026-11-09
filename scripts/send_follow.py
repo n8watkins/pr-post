@@ -17,7 +17,7 @@ follow-add workflow.
 Sends only when [follow] email = true and email is on under [delivery], and
 only picks from a follow.py run in the last eight days. --force sends once even
 though [follow] email is off, for a test the owner asked for. --dry-run runs
-every check and never contacts Resend.
+every check and never sends. It goes through [email] via, as send_email.py does.
 """
 
 import argparse
@@ -153,16 +153,16 @@ def main():
     if not watch["follow"]["email"] and not args.force:
         print("The Who to follow email is off ([follow] email = false); skipping.")
         return
-    resend = os.environ.get("RESEND_API_KEY")
-    if stop := E.check_delivery(watch, resend, args.dry_run):
+    if stop := E.check_delivery(watch, args.dry_run, paper):
         print(stop)
         return
     one_click = "one-click buttons" if key and watch["site"]["url"] else "plain links (no ACTION_SIGNING_KEY or [site] url)"
     if args.dry_run:
-        print(f"Dry run: would send {subject!r} with {one_click}; RESEND_API_KEY is {'set' if resend else 'not set'}. Nothing was sent.")
+        # The subject names people, so it stays out of what may be a public Actions log.
+        print(f"Dry run: would send the Who to follow email with {one_click} through {E.describe(watch)}. Nothing was sent.")
         return
     print(f"Sending with {one_click}.")
-    print("Sent:", E.send(resend, watch["email"]["from"], watch["email"]["to"], subject, page, text))
+    print("Sent:", E.deliver(watch, subject, page, text))
 
 
 if __name__ == "__main__":
