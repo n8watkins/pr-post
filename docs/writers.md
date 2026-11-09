@@ -22,7 +22,16 @@ All paths are inside the paper folder (`demo/` for the demo).
 | `reports/<id>/<YYYY-MM-DD>-weekly.md` or `-update.md` | A report on one person | "This week" on their page, plus a permalink and back issues |
 | `profiles/<id>.md` | Long-term notes on a person and their projects | "The file on ..." on their page |
 | `editions/<YYYY-MM-DD>-<weekly or update>.json` | A written front page | The front page while it is the newest; older ones under Back issues |
-| `summaries/<YYYY-MM-DD>.json` | One paragraph per person | The gist on their page and `summary` in `feed.json`, labelled "AI summary" unless `source` is `"human"` |
+| `summaries/<YYYY-MM-DD>.json` (optional) | One paragraph per person | The gist on their page and `summary` in `feed.json`, labelled "AI summary" unless `source` is `"human"`; without it the gist comes from the person's edition story |
+
+Every report with the same date and kind forms an issue, published at `/r/<date>-<kind>/` with a TL;DR, a table of contents and folding sections.
+That page is what the email digest links to; the digest itself carries only the TL;DR (the edition's `tldr` list) and each report's first bullet.
+
+## Briefs: what a writer reads
+
+`scripts/brief.py`, run after `stats.py`, writes `briefs/<id>.md` for each person: a few kilobytes with the numbers from `stats/`, the busiest public repos, merged pull requests with the start of each description, releases, new and archived repos, videos, and READMEs the profile does not mention yet.
+`data/<id>.json` can run to hundreds of kilobytes for a busy person, and an AI writer pays for every byte it reads on every later step, so reading briefs instead is the biggest single saving.
+Commit `briefs/` with `data/` and `stats/`.
 
 [INSTRUCTIONS.md](../INSTRUCTIONS.md) describes each file's format in detail.
 The summaries file looks like this:
@@ -70,10 +79,11 @@ This is how the original private paper runs.
            run: |
              python3 scripts/collect.py
              python3 scripts/stats.py
+             python3 scripts/brief.py
          - run: |
              git config user.name "pr-post collector"
              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-             git add "$PR_POST_PAPER/data" "$PR_POST_PAPER/stats"
+             git add "$PR_POST_PAPER/data" "$PR_POST_PAPER/stats" "$PR_POST_PAPER/briefs"
              git diff --cached --quiet && exit 0
              git commit -m "data: collect activity $(date -u +%F)"
              git push

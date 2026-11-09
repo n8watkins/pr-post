@@ -23,6 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config  # noqa: E402
+import digest  # noqa: E402
 import feed as feedlib  # noqa: E402
 import follow_lib  # noqa: E402
 from md import blocks, safe_url  # noqa: E402
@@ -97,10 +98,12 @@ def inline(text):
 
 
 def render_md(md, skip_h1=True, demote=0):
+    return render_blocks([b for b in blocks(md) if not (skip_h1 and b[0] == "h1")], demote)
+
+
+def render_blocks(parsed, demote=0):
     out = []
-    for kind, data in blocks(md):
-        if kind == "h1" and skip_h1:
-            continue
+    for kind, data in parsed:
         if kind in ("h1", "h2", "h3"):
             level = min(int(kind[1]) + demote, 4)
             out.append(f"<h{level}>{inline(data)}</h{level}>")
@@ -687,7 +690,7 @@ def person_page(p, st, reports, profile, people, editions, summary, facts):
         stem, md = reports[0]
         kind = "Weekly report" if stem.endswith("weekly") else "Midweek update"
         week_html = f"""<div class="sect">This week</div>
-<div class="report-meta label"><span>{kind} · {day_short(stem[:10])}</span><a href="{u("/p/" + esc(pid) + "/" + esc(stem) + "/")}">Permalink</a></div>
+<div class="report-meta label"><span>{kind} · {day_short(stem[:10])}</span><span><a href="{u("/r/" + esc(stem) + "/")}">Whole issue</a> · <a href="{u("/p/" + esc(pid) + "/" + esc(stem) + "/")}">Permalink</a></span></div>
 <div class="prose">{render_md(md, demote=1)}</div>"""
     elif st["recent"]:
         week_html = f'<div class="sect">This week, from the record</div>{recent_list(st["recent"])}'
@@ -729,6 +732,56 @@ def report_page(p, stem, md):
 <div class="reading"><h1 class="page-hed">{inline(report_title(md, stem))}</h1><div class="prose">{render_md(md, demote=1)}</div></div>"""
 
 
+# ---------- issues: one page per writer run, linked from the email ----------
+
+def issues_of(people, reports):
+    """{"<date>-<kind>": [(person, md), ...]} in display order, newest issue first."""
+    out = {}
+    for p in people:
+        for stem, md in reports[p["id"]]:
+            out.setdefault(stem, []).append((p, md))
+    return dict(sorted(out.items(), reverse=True))
+
+
+def folded_report(md):
+    """A report with each section folded: the TL;DR (or a report with no sections) stays open."""
+    parts = []
+    for heading, content in digest.sections(md):
+        body = f'<div class="prose">{render_blocks(content, demote=1)}</div>'
+        if heading is None:
+            parts.append(body)
+        else:
+            open_ = " open" if digest.is_tldr(heading) else ""
+            parts.append(f'<details class="rsect"{open_}><summary>{inline(heading)}</summary>{body}</details>')
+    return "".join(parts)
+
+
+def issue_page(stem, items, edition):
+    kind = digest.KIND_NAMES[digest.kind_of(stem)]
+    span = digest.span_of(digest.title_of(items[0][1], "")) or day_long(stem[:10])
+    bullets = digest.tldr(edition, items)
+    tldr_html = f'<div class="tldr"><div class="sect">TL;DR</div><ul>{"".join(f"<li>{esc(b)}</li>" for b in bullets)}</ul></div>' if bullets else ""
+    toc = "".join(
+        f'<li><a href="#{esc(p["id"])}">{esc(p["name"])}</a>'
+        f'<span class="toc-line">{"Quiet this time" if digest.is_quiet(md) else esc(digest.one_liner(md, 120))}</span></li>'
+        for p, md in items
+    )
+    people = "".join(
+        f"""<section class="issue-person" id="{esc(p["id"])}">
+  <div class="ip-head"><h2><a href="{u("/p/" + esc(p["id"]) + "/")}">{esc(p["name"])}</a></h2>
+  <span class="label"><a href="{u("/p/" + esc(p["id"]) + "/" + esc(stem) + "/")}">Permalink</a> · <a href="#top">Contents</a></span></div>
+  {folded_report(md)}
+</section>"""
+        for p, md in items
+    )
+    return f"""<div class="runhead" id="top"><span>{esc(PAPER)} · {kind}</span><span>{day_short(stem[:10])}</span></div>
+<h1 class="page-hed">{esc(span)}</h1>
+<p class="page-sub">{kind} on {plural(len(items), "person", "people")}. Sections fold: open the ones you want.</p>
+{tldr_html}
+<nav class="toc" aria-label="In this issue"><div class="sect">In this issue</div><ol>{toc}</ol></nav>
+<div class="issue-people">{people}</div>"""
+
+
 # ---------- archive + settings ----------
 
 def archive_page(editions, people, reports):
@@ -736,15 +789,10 @@ def archive_page(editions, people, reports):
         f'<li><a href="{u("/e/" + esc(e["stem"]) + "/")}">{esc(e["lead"]["headline"])}</a><span class="label">No. {e["number"]} · {day_long(e["date"])}</span></li>'
         for e in reversed(editions)
     ) or '<li class="muted">No written editions yet. The front page is a facts edition, rebuilt from public activity on every run.</li>'
-    by_date = {}
-    for p in people:
-        for stem, md in reports[p["id"]]:
-            by_date.setdefault(stem[:10], []).append((p, stem, md))
     report_items = "".join(
-        f'<li><span class="label">{day_long(d)}</span>' + " · ".join(
-            f'<a href="{u("/p/" + esc(p["id"]) + "/" + esc(stem) + "/")}" style="font-family:var(--body);font-size:18px;font-weight:600">{esc(p["name"])}</a>' for p, stem, _ in items
-        ) + "</li>"
-        for d, items in sorted(by_date.items(), reverse=True)
+        f'<li><a href="{u("/r/" + esc(stem) + "/")}">{digest.KIND_NAMES[digest.kind_of(stem)]}, {day_long(stem[:10])}</a>'
+        f'<span class="label">{plural(len(items), "person", "people")}: ' + ", ".join(esc(p["name"]) for p, _ in items) + "</span></li>"
+        for stem, items in issues_of(people, reports).items()
     )
     reports_html = f'<div class="sect">Reports by date</div><ul class="arch">{report_items}</ul>' if report_items else ""
     return f"""<h1 class="page-hed">Back issues</h1><p class="page-sub">Every written front page, newest first, and every report behind them.</p>
@@ -815,9 +863,15 @@ def follow_page(latest, reports, repo_url):
     skip_html = (f'<details class="fc-skipped"><summary class="sect">Researched, but not a fit ({len(skipped)})</summary><div class="fgrid">{"".join(card(c) for c in skipped)}</div></details>'
                  if skipped else "")
     stack = ", ".join(latest.get("stack", [])[:8])
+    toc_items = "".join(
+        f'<li><a href="#{esc(c["login"].lower())}">{esc(c["name"])}</a><span class="toc-line">{c["score"]} · {esc(c["recommendation"])}</span></li>'
+        for c in picks + rest + skipped
+    )
+    toc_html = f'<nav class="toc" aria-label="Everyone on this page"><div class="sect">On this page</div><ol>{toc_items}</ol></nav>' if toc_items else ""
     return f"""<div class="runhead"><span>{esc(PAPER)} · Who to follow</span><span>Updated {day_short(latest["date"])}</span></div>
 <h1 class="page-hed">Who to follow</h1>
 <p class="page-sub">Builders you do not follow yet, found through the people you read, the repos you build on and projects like yours. Each has a one-time mini report from public sources; every fact links to where it came from.</p>
+{toc_html}
 <div class="sect">This week's picks</div>
 <div class="fgrid">{picks_html}</div>
 {rest_html}
@@ -873,6 +927,10 @@ def build(paper, out):
         for stem, md in reports[p["id"]]:
             write(f"p/{p['id']}/{stem}/index.html", layout(f"{report_title(md, stem)} · {PAPER}", sheet(report_page(p, stem, md)), order, snaps, current=p["id"]))
 
+    for stem, items in issues_of(order, reports).items():
+        title = f"{digest.KIND_NAMES[digest.kind_of(stem)]}, {day_short(stem[:10])} · {PAPER}"
+        write(f"r/{stem}/index.html", layout(title, sheet(issue_page(stem, items, digest.load_edition(paper, stem))), order, snaps, page="archive",
+                                            description=f"Every report from the {day_long(stem[:10])} issue of {PAPER}."))
     write("archive/index.html", layout(f"Back issues · {PAPER}", sheet(archive_page(editions, order, reports)), order, snaps, page="archive"))
     if HAS_FOLLOW:
         write("follow/index.html", layout(f"Who to follow · {PAPER}", sheet(follow_page(follow_latest, follow_reports, cfg["links"].get("repo"))),

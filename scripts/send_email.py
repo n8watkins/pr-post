@@ -1,259 +1,40 @@
 #!/usr/bin/env python3
-"""Email a Markdown report through Resend, rendered as a styled HTML email.
+"""Email one issue of reports through Resend as a short digest.
 
 Usage:
     python3 scripts/send_email.py [--paper DIR] <paper>/reports/<id>/<date>-<kind>.md [more.md ...]
     python3 scripts/send_email.py [--paper DIR] <report.md> ... --preview out.html   # render only
     python3 scripts/send_email.py [--paper DIR] <report.md> ... --dry-run            # every check, no send
 
-Several reports become one digest email with an "In this issue" summary.
-A weekly digest also gets the week's "Who to follow" picks when [follow] is on
-and follow.py ran in the last eight days (--follow on|off overrides that).
+The email is deliberately short: a TL;DR of three to five bullets, one line
+per person with a link, and a "Read the full edition" button. The full
+reports live on the web edition's issue page, /r/<date>-<kind>/ (build_site.py),
+where sections fold and a table of contents jumps between people. Without
+[site] url the links point at the reports on GitHub instead.
+
+The TL;DR comes from the issue's edition (editions/<date>-<kind>.json): its
+"tldr" list, else its headlines, else the busiest people's first bullets.
+"Who to follow" has its own email (send_follow.py).
 
 Needs RESEND_API_KEY to send. Recipient and sender come from [email] in
 watchlist.toml, and sending must be turned on with email = true under
 [delivery]. Exits 0 with a message when email is turned off or no key is
 configured, so a run without email still succeeds. --dry-run runs every check
-a real send would (email on, a recipient, a key) and prints the subject, but
-never contacts Resend; add --preview to keep the rendered HTML too.
-
-Email clients ignore most CSS, so the layout is tables with inline styles, and
-the Markdown is converted here (the subset reports use) to avoid dependencies.
+a real send would and prints the subject, but never contacts Resend.
 """
 
 import argparse
-import html
-import json
 import os
-import re
 import sys
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config  # noqa: E402
-import follow_lib  # noqa: E402
-from md import blocks, safe_url  # noqa: E402
+import digest  # noqa: E402
+import email_lib as E  # noqa: E402
 
-FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif"
-MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
-INK, MUTED, LINE, ACCENT, PAPER, CANVAS = "#16161d", "#5f6170", "#e6e4ee", "#5b3df5", "#ffffff", "#f1eff8"
+KINDS = {"weekly": "Weekly report", "update": "Midweek update"}
 
-KINDS = {
-    "weekly": ("WEEKLY REPORT", "#5b3df5", "#c026d3"),
-    "update": ("MIDWEEK UPDATE", "#0e7490", "#2563eb"),
-}
-
-
-# ---------- Markdown subset -> inline-styled HTML ----------
-
-def inline(text):
-    text = html.escape(text, quote=False)
-    text = re.sub(r"`([^`]+)`", lambda m: f'<code style="font-family:{MONO};font-size:13px;background:#f3f1fa;border-radius:4px;padding:1px 5px">{m[1]}</code>', text)
-    text = re.sub(r"\[([^\]]+)\]\(([^)\s]+)\)", lambda m: f'<a href="{html.escape(safe_url(html.unescape(m[2])))}" style="color:{ACCENT};text-decoration:none;font-weight:600">{m[1]}</a>', text)
-    text = re.sub(r"\*\*([^*]+)\*\*", rf'<strong style="color:{INK}">\1</strong>', text)
-    text = re.sub(r"(?<![\w*])\*([^*\n]+)\*(?!\w)", r"<em>\1</em>", text)
-    return text
-
-
-def render_list(ordered, items, tight=False):
-    tag = "ol" if ordered else "ul"
-    rows = []
-    for nested, text in items:
-        pad = "padding-left:18px;" if nested else ""
-        size = "14px" if nested else "15px"
-        rows.append(f'<li style="margin:0 0 {6 if tight else 9}px;{pad}font-size:{size};line-height:1.55">{inline(text)}</li>')
-    return f'<{tag} style="margin:0 0 14px;padding-left:20px;color:{INK}">{"".join(rows)}</{tag}>'
-
-
-def render_table(rows):
-    head, *body = rows
-    th = "".join(f'<th align="left" style="padding:9px 12px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:{MUTED};border-bottom:2px solid {LINE};white-space:nowrap">{inline(c)}</th>' for c in head)
-    trs = []
-    for n, r in enumerate(body):
-        bg = "#faf9fd" if n % 2 else PAPER
-        tds = "".join(f'<td style="padding:10px 12px;font-size:14px;line-height:1.45;color:{INK};border-bottom:1px solid {LINE};{"font-weight:600;" if j == 0 else ""}">{inline(c)}</td>' for j, c in enumerate(r))
-        trs.append(f'<tr style="background:{bg}">{tds}</tr>')
-    return f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:4px 0 14px"><tr>{th}</tr>{"".join(trs)}</table>'
-
-
-def render_block(kind, data):
-    if kind == "p":
-        # "**What it is:** ..." style lead-ins become small labels.
-        if m := re.match(r"^\*\*([^*]+?):?\*\*:?\s*(.*)", data):
-            return (f'<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:{INK}">'
-                    f'<span style="display:inline-block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:{ACCENT};margin-right:6px">{html.escape(m[1])}</span>{inline(m[2])}</p>')
-        return f'<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:{INK}">{inline(data)}</p>'
-    if kind == "h3":
-        return f'<h3 style="margin:18px 0 8px;font-size:15px;color:{INK}">{inline(data)}</h3>'
-    if kind == "list":
-        return render_list(*data)
-    if kind == "table":
-        return render_table(data)
-    if kind == "hr":
-        return f'<div style="height:1px;background:{LINE};margin:18px 0"></div>'
-    return ""
-
-
-def card(title, body, highlight=False):
-    if highlight:
-        return (f'<tr><td style="padding:0 0 16px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-                f'style="background:#f6f3ff;border:1px solid #ddd5ff;border-radius:14px"><tr><td style="padding:22px 24px 10px">'
-                f'<div style="font-size:12px;font-weight:800;letter-spacing:.12em;color:{ACCENT};margin:0 0 12px">&#9889; {html.escape(title.upper())}</div>'
-                f'{body}</td></tr></table></td></tr>')
-    heading = (f'<h2 style="margin:0 0 14px;font-size:19px;line-height:1.3;color:{INK};letter-spacing:-.01em">'
-               f'<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:{ACCENT};margin:0 10px 2px 0"></span>{inline(title)}</h2>') if title else ""
-    return (f'<tr><td style="padding:0 0 16px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-            f'style="background:{PAPER};border:1px solid {LINE};border-radius:14px"><tr><td style="padding:22px 24px 10px">'
-            f'{heading}{body}</td></tr></table></td></tr>')
-
-
-def split_title(title):
-    # Report titles look like "<name>: <start> to <end>".
-    name, _, span = title.partition(":")
-    return name.strip(), span.strip()
-
-
-def plain(text):
-    """Markdown to preheader text: keep link labels, drop link targets of any scheme."""
-    text = re.sub(r"\[([^\]]+)\]\([^)\s]*\)*", r"\1", text)
-    return re.sub(r"[*`\[\]]", "", text)
-
-
-def person_cards(md, fallback):
-    """One report -> (title, card rows, first TL;DR line)."""
-    parsed = blocks(md)
-    title = next((d for k, d in parsed if k == "h1"), fallback)
-    parsed = [b for b in parsed if b[0] != "h1"]
-
-    # Split on h2 into sections; anything before the first h2 is an untitled intro.
-    sections, current = [], [None, []]
-    for k, d in parsed:
-        if k == "h2":
-            sections.append(current)
-            current = [d, []]
-        else:
-            current[1].append((k, d))
-    sections.append(current)
-    sections = [s for s in sections if s[0] or s[1]]
-
-    lead, cards = "", []
-    for heading, content in sections:
-        is_tldr = bool(heading and re.match(r"(?i)tl;?dr", heading))
-        if is_tldr or not lead:
-            first = next((d for k, d in content if k in ("p", "list")), None)
-            if first:
-                lead = plain(first if isinstance(first, str) else first[1][0][1])
-        body = "".join(
-            render_list(*d, tight=True) if is_tldr and k == "list" else render_block(k, d)
-            for k, d in content
-        )
-        cards.append(card(heading or "", body, highlight=is_tldr))
-    return title, "".join(cards), lead
-
-
-def person_divider(n, total, name, span):
-    return (f'<tr><td style="padding:22px 6px 12px">'
-            f'<div style="font-size:11px;font-weight:800;letter-spacing:.14em;color:{ACCENT}">{n} OF {total}</div>'
-            f'<div style="font-size:26px;line-height:1.2;font-weight:800;color:{INK};letter-spacing:-.02em;margin:4px 0 2px">{inline(name)}</div>'
-            f'<div style="font-size:14px;color:{MUTED}">{inline(span)}</div></td></tr>')
-
-
-REC_COLORS = {"Follow": ("#ffffff", ACCENT), "Maybe": (ACCENT, "#ece8ff"), "Skip": (MUTED, "#f1f0f4")}
-
-
-def follow_section(latest, reports, site_url, repo_url, limit=5):
-    """The "Who to follow" card: this week's picks, each with its score, why, and the two actions."""
-    by_login = {c["login"]: c for c in latest["candidates"]}
-    picks = [by_login[x] for x in latest.get("picks", []) if x in by_login][:limit]
-    if not picks:
-        return ""
-    rows = []
-    add_url = follow_lib.add_url(repo_url)
-    for c in picks:
-        rep = reports[c["login"].lower()]
-        fg, bg = REC_COLORS.get(c["recommendation"], REC_COLORS["Maybe"])
-        fact = follow_lib.headline_fact(rep)
-        page = f"{site_url}/follow/#{c['login'].lower()}" if site_url else None
-        actions = [f'<a href="{html.escape(safe_url(c["profile"]))}" style="color:{ACCENT};font-weight:700;text-decoration:none">Follow on GitHub</a>']
-        if page:
-            actions.append(f'<a href="{html.escape(safe_url(page))}" style="color:{ACCENT};font-weight:700;text-decoration:none">Mini report</a>')
-        if add_url:
-            actions.append(f'<a href="{html.escape(safe_url(add_url))}" style="color:{ACCENT};font-weight:700;text-decoration:none">Add to PR Post</a>')
-        avatar = c.get("avatar")
-        img = (f'<img src="{html.escape(safe_url(avatar))}" width="44" height="44" alt="" style="display:block;border-radius:50%;border:1px solid {LINE}">'
-               if avatar and config.is_http_url(avatar) else "")
-        rows.append(
-            f'<tr><td valign="top" style="padding:12px 12px 12px 0;border-top:1px solid {LINE};width:44px">{img}</td>'
-            f'<td valign="top" style="padding:12px 0;border-top:1px solid {LINE}">'
-            f'<div style="font-size:16px;font-weight:800;color:{INK}">{html.escape(c["name"])} <span style="font-weight:400;color:{MUTED};font-size:13px">@{html.escape(c["login"])}</span></div>'
-            + (f'<div style="font-size:13px;color:{MUTED};margin:2px 0 0">{html.escape(fact)}</div>' if fact else "")
-            + f'<div style="font-size:14px;line-height:1.5;color:{INK};margin:6px 0">{html.escape(c["why_follow"])}</div>'
-            f'<div style="font-size:13px">{" &nbsp;&middot;&nbsp; ".join(actions)}</div></td>'
-            f'<td valign="top" align="right" style="padding:12px 0 12px 12px;border-top:1px solid {LINE};white-space:nowrap">'
-            f'<div style="font-size:24px;font-weight:800;color:{INK};line-height:1">{c["score"]}</div>'
-            f'<div style="display:inline-block;margin-top:4px;font-size:10px;font-weight:800;letter-spacing:.1em;color:{fg};background:{bg};border-radius:999px;padding:3px 8px">{html.escape(c["recommendation"].upper())}</div></td></tr>'
-        )
-    intro = (f'<p style="margin:0 0 10px;font-size:14px;line-height:1.55;color:{MUTED}">Builders you do not follow yet, scored 0 to 100 for fit with your stack and interests. '
-             f'Nothing is followed for you: the link only opens their profile.</p>')
-    body = f'{intro}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 12px">{"".join(rows)}</table>'
-    return card("Who to follow", body)
-
-
-def render(reports, kind, links, brand="PR Post", extra_rows=""):
-    """reports: [(markdown, fallback title)] in display order."""
-    people = [person_cards(md, fb) for md, fb in reports]
-    label, c1, c2 = KINDS.get(kind, KINDS["weekly"])
-
-    if len(people) == 1:
-        title, rows, preheader = people[0]
-        head_name, head_span = split_title(title)
-    else:
-        spans = [split_title(t)[1] for t, _, _ in people]
-        head_name, head_span = f"{len(people)} people", spans[0]
-        title = f"{head_name}: {head_span}"
-        preheader = " / ".join(split_title(t)[0] for t, _, _ in people)
-        toc = "".join(
-            f'<li style="margin:0 0 9px;font-size:15px;line-height:1.5;color:{INK}"><strong style="color:{INK}">{html.escape(split_title(t)[0])}</strong>'
-            f'<span style="color:{MUTED}">: </span>{html.escape(lead[:160])}</li>'
-            for t, _, lead in people
-        )
-        rows = card("In this issue", f'<ul style="margin:0 0 14px;padding-left:20px">{toc}</ul>', highlight=True)
-        for n, (t, cards, _) in enumerate(people, 1):
-            rows += person_divider(n, len(people), *split_title(t)) + cards
-
-    footer_links = " &nbsp;&middot;&nbsp; ".join(
-        f'<a href="{html.escape(safe_url(u))}" style="color:{MUTED};text-decoration:underline">{t}</a>' for t, u in links if u
-    )
-    return f"""<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light only"><title>{html.escape(title)}</title></head>
-<body style="margin:0;padding:0;background:{CANVAS};font-family:{FONT};-webkit-font-smoothing:antialiased">
-<div style="display:none;max-height:0;overflow:hidden;opacity:0">{html.escape(preheader[:140])}&#8199;&#847;&#8199;&#847;&#8199;&#847;</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{CANVAS}"><tr><td align="center" style="padding:24px 12px 40px">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px">
-<tr><td style="padding:0 0 16px">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{c1};background-image:linear-gradient(135deg,{c1} 0%,{c2} 100%);border-radius:18px">
-  <tr><td style="padding:26px 28px 28px">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-      <td style="font-family:{MONO};font-size:14px;font-weight:700;color:#ffffff;letter-spacing:.02em">{html.escape(brand)}</td>
-      <td align="right"><span style="display:inline-block;font-size:10px;font-weight:800;letter-spacing:.14em;color:{c1};background:#ffffff;border-radius:999px;padding:5px 10px">{label}</span></td>
-    </tr></table>
-    <div style="font-size:32px;line-height:1.15;font-weight:800;color:#ffffff;letter-spacing:-.02em;margin:26px 0 6px">{inline(head_name)}</div>
-    <div style="font-size:15px;color:#ffffff;opacity:.85">{inline(head_span)}</div>
-  </td></tr></table>
-</td></tr>
-{rows}
-{extra_rows}
-<tr><td align="center" style="padding:10px 12px 0;font-size:12px;line-height:1.7;color:{MUTED}">
-  {footer_links}<br>
-  To stop these emails, set <code style="font-family:{MONO}">email = false</code> in watchlist.toml.
-</td></tr>
-</table></td></tr></table></body></html>"""
-
-
-# ---------- sending ----------
 
 def repo_path(path):
     """A file's path inside the git repository that holds it, for a link to it on GitHub, or None.
@@ -268,23 +49,76 @@ def repo_path(path):
     return None
 
 
-def subject_for(reports, kind):
-    titles = [next((l[2:].strip() for l in md.splitlines() if l.startswith("# ")), fb) for md, fb in reports]
-    label = KINDS[kind][0].title()
-    if len(titles) == 1:
-        return f"{label}: {titles[0]}"
-    return f"{label}: {len(titles)} people, {split_title(titles[0])[1]}"
+def bullet_rows(bullets):
+    return "".join(
+        f'<tr><td valign="top" class="e-accent" style="width:18px;padding:0 0 9px;font-family:{E.SANS};font-size:16px;line-height:24px;color:{E.ACCENT};font-weight:700">&#8226;</td>'
+        f'<td class="e-ink" style="padding:0 0 9px;font-family:{E.SANS};font-size:16px;line-height:24px;color:{E.INK}">{E.esc(b)}</td></tr>'
+        for b in bullets
+    )
+
+
+def person_rows(items):
+    """One line per person who shipped something, then one line naming the quiet ones."""
+    rows, quiet = [], []
+    for person, md, url in items:
+        if digest.is_quiet(md):
+            quiet.append((person, url))
+            continue
+        read = f' {E.link(url, "Read&nbsp;&rarr;")}' if url else ""
+        rows.append(
+            f'<tr><td class="e-rule" style="padding:10px 0;border-top:1px solid {E.RULE};font-family:{E.SANS};font-size:15px;line-height:22px">'
+            f'<strong class="e-ink" style="color:{E.INK}">{E.esc(person["name"])}</strong>'
+            f'<span class="e-soft" style="color:{E.SOFT}"> &middot; {E.esc(digest.one_liner(md, 120))}</span>{read}</td></tr>'
+        )
+    if quiet:
+        names = ", ".join(E.link(u, E.esc(p["name"]), "e-soft", E.SOFT, 400) if u else E.esc(p["name"]) for p, u in quiet)
+        rows.append(
+            f'<tr><td class="e-rule e-faint" style="padding:10px 0;border-top:1px solid {E.RULE};font-family:{E.SANS};font-size:14px;line-height:21px;color:{E.FAINT}">'
+            f'Quiet this time: {names}.</td></tr>'
+        )
+    return "".join(rows)
+
+
+def render(items, kind, stem, edition, edition_url, links, brand="PR Post"):
+    """items: [(person dict, report markdown, link or None)] in display order. Returns (html, text, subject)."""
+    titles = [digest.title_of(md, p["name"]) for p, md, _ in items]
+    span = digest.span_of(titles[0]) or stem[:10]
+    label = KINDS.get(kind, KINDS["weekly"])
+    count = f"{len(items)} {'person' if len(items) == 1 else 'people'}"
+    bullets = digest.tldr(edition, [(p, md) for p, md, _ in items])
+
+    rows = E.section(E.label("TL;DR") + f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">{bullet_rows(bullets)}</table>', top_rule=False)
+    rows += E.section(E.label("Who shipped what")
+                      + f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">{person_rows(items)}</table>')
+    if edition_url:
+        rows += E.section(
+            E.button(edition_url, "Read the full edition")
+            + f'<div class="e-faint" style="font-family:{E.SANS};font-size:13px;line-height:1.5;color:{E.FAINT};text-align:center;margin:12px 0 0">'
+              f'Full reports, numbers and every link, on {E.esc(brand)}.</div>')
+
+    footer_links = " &nbsp;&middot;&nbsp; ".join(E.link(u, E.esc(t), "e-faint", E.FAINT, 400) for t, u in links if u)
+    footer = (f"{footer_links}<br>" if footer_links else "") + \
+        f'To stop these emails, set <span style="font-family:{E.MONO}">email = false</span> under [delivery] in watchlist.toml.'
+    heading = E.esc(span)
+    page = E.shell(f"{label}: {span}", " / ".join(bullets)[:140], (brand, label), heading, f"{label} &middot; {count}", rows, footer)
+
+    text = [f"{brand}: {label}, {span} ({count})", "", "TL;DR"] + [f"- {b}" for b in bullets] + ["", "Who shipped what"]
+    for p, md, url in items:
+        line = "quiet this time" if digest.is_quiet(md) else digest.one_liner(md, 120)
+        text.append(f"- {p['name']}: {line}" + (f" {url}" if url else ""))
+    if edition_url:
+        text += ["", f"Read the full edition: {edition_url}"]
+    subject = f"{label}: {titles[0]}" if len(items) == 1 else f"{label}: {count}, {span}"
+    return page, "\n".join(text) + "\n", subject
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--paper", help="folder holding watchlist.toml (default: $PR_POST_PAPER or the repo root)")
-    ap.add_argument("reports", nargs="+", help="one email for all of them, in watchlist order")
+    ap.add_argument("reports", nargs="+", help="the reports of one issue (same date and kind); one email for all")
     ap.add_argument("--subject", help="default: built from the report titles")
     ap.add_argument("--preview", metavar="FILE", help="write the HTML here instead of sending")
     ap.add_argument("--dry-run", action="store_true", help="run every check a real send would, print the subject, but never send")
-    ap.add_argument("--follow", choices=("auto", "on", "off"), default="auto",
-                    help='"Who to follow" picks: auto adds them to weekly digests only (default)')
     args = ap.parse_args()
 
     paper = config.paper_dir(args.paper)
@@ -292,33 +126,34 @@ def main():
         watch = config.load(paper)
     except config.ConfigError as e:
         sys.exit(f"Config error: {e}")
-    cfg, link_cfg = watch["email"], watch["links"]
+    by_id = {p["id"]: p for p in watch["people"]}
     order = [p["id"] for p in watch["people"]]
     paths = sorted(
         (Path(r) for r in args.reports),
         key=lambda p: order.index(p.parent.name.lower()) if p.parent.name.lower() in order else len(order),
     )
-    kind = "update" if all(p.stem.endswith("-update") for p in paths) else "weekly"
-    reports = [(p.read_text(), p.stem) for p in paths]
+    stems = {p.stem for p in paths}
+    if len(stems) > 1:
+        sys.exit(f"One email covers one issue (one date and kind); got {', '.join(sorted(stems))}.")
+    stem = paths[0].stem
+    kind = digest.kind_of(stem)
 
-    repo = link_cfg.get("repo")
-    rel = repo_path(paths[0]) if len(paths) == 1 else None
-    github = f"{repo}/blob/main/{rel}" if repo and rel else repo
-    links = [
-        ("Read on GitHub", github),
-        ("Read the paper", watch["site"]["url"] or None),
-    ] + [(label.replace("_", " ").title(), url) for label, url in link_cfg.items() if label != "repo" and isinstance(url, str)]
-    follow_html, follow_text = "", ""
-    if args.follow == "on" or (args.follow == "auto" and kind == "weekly"):
-        if watch["follow"]["enabled"] and watch["follow"]["email"]:
-            latest, follow_reports = follow_lib.load_latest(paper, watch, max_age_days=8)
-            if latest:
-                follow_html = follow_section(latest, follow_reports, watch["site"]["url"], repo, watch["follow"]["picks"])
-                picks = [c for x in latest.get("picks", [])[: watch["follow"]["picks"]] for c in latest["candidates"] if c["login"] == x]
-                if picks:
-                    follow_text = "\n\n---\n\nWho to follow\n\n" + "\n".join(
-                        f"- {c['name']} (@{c['login']}), {c['score']}/100 {c['recommendation']}: {c['why_follow']} {c['profile']}" for c in picks)
-    page = render(reports, kind, links, watch["site"]["title"], follow_html)
+    site = watch["site"]["url"]
+    repo = watch["links"].get("repo")
+    edition_url = f"{site}/r/{stem}/" if site else None
+    items = []
+    for p in paths:
+        md = p.read_text()
+        pid = p.parent.name.lower()
+        person = by_id.get(pid) or {"id": pid, "name": digest.title_of(md, pid).partition(":")[0].strip()}
+        rel = repo_path(p)
+        url = f"{edition_url}#{pid}" if edition_url else (f"{repo}/blob/main/{rel}" if repo and rel else None)
+        items.append((person, md, url))
+
+    links = [("Read the paper", site or None), ("Reports on GitHub", repo)] + [
+        (label.replace("_", " ").title(), url) for label, url in watch["links"].items() if label != "repo" and isinstance(url, str)]
+    page, text, subject = render(items, kind, stem, digest.load_edition(paper, stem), edition_url, links, watch["site"]["title"])
+    subject = args.subject or subject
 
     if args.preview:
         Path(args.preview).write_text(page)
@@ -326,39 +161,17 @@ def main():
         if not args.dry_run:
             return
 
-    if not watch["delivery"].get("email"):
-        print("Email is turned off in watchlist.toml; skipping.")
-        return
-    if not cfg.get("to"):
-        sys.exit("Set [email] to in watchlist.toml before turning email on.")
     key = os.environ.get("RESEND_API_KEY")
-    if not key and not args.dry_run:
-        print("RESEND_API_KEY not set; skipping email.")
+    if stop := E.check_delivery(watch, key, args.dry_run):
+        print(stop)
         return
-
-    subject = args.subject or subject_for(reports, kind)
+    cfg = watch["email"]
     if args.dry_run:
-        # Never print the recipient or the key: dry runs show up in public Actions logs.
-        print(f"Dry run: would send {len(reports)} report(s) as one email, subject {subject!r},"
+        # Never print the recipient or the key: dry runs show up in Actions logs.
+        print(f"Dry run: would send {len(items)} report(s) as one email, subject {subject!r},"
               f" from {cfg['from']!r}; RESEND_API_KEY is {'set' if key else 'not set'}. Nothing was sent.")
         return
-    payload = {
-        "from": cfg["from"],
-        "to": [cfg["to"]],
-        "subject": subject,
-        "html": page,
-        "text": "\n\n---\n\n".join(md for md, _ in reports) + follow_text,
-    }
-    req = urllib.request.Request(
-        "https://api.resend.com/emails",
-        data=json.dumps(payload).encode(),
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json", "User-Agent": "pr-post"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            print("Sent:", json.load(r).get("id"))
-    except urllib.error.HTTPError as e:
-        sys.exit(f"Resend refused the email ({e.code}): {e.read().decode()[:500]}")
+    print("Sent:", E.send(key, cfg["from"], cfg["to"], subject, page, text))
 
 
 if __name__ == "__main__":

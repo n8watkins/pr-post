@@ -56,12 +56,13 @@ FOLLOW_DEFAULTS = {
     "weights": {"stack": 30, "activity": 15, "quality": 15, "relevance": 30, "network": 10},
     "thresholds": {"follow": 65, "maybe": 45},
     "max_new": 10,            # new mini reports per run
-    "picks": 5,               # suggestions per week, shown in the email
+    "picks": 5,               # suggestions per week, the top ones go in the Who to follow email
     "cooldown_weeks": 8,      # weeks before someone can be suggested again
     "rejump": 15,             # ...unless their score rose by this many points
     "following_pages": 2,     # pages of 100 read from each builder's following list
     "max_requests": 400,      # GitHub requests per run, all sources together
-    "email": True,            # add the picks to the weekly digest email
+    "email": False,           # send the separate Who to follow email (send_follow.py) after each run
+    "max_follows_per_week": 5,  # one-click follows from that email, at most this many in 7 days
     "public_page": False,     # build the page on a public site too (it names people you do not follow yet)
 }
 
@@ -169,7 +170,7 @@ def _follow(raw, people):
     for key in ("enabled", "email", "public_page"):
         if not isinstance(f[key], bool):
             raise ConfigError(f"[follow] {key} must be true or false")
-    for key in ("max_new", "picks", "cooldown_weeks", "rejump", "following_pages", "max_requests"):
+    for key in ("max_new", "picks", "cooldown_weeks", "rejump", "following_pages", "max_requests", "max_follows_per_week"):
         if not isinstance(f[key], int) or isinstance(f[key], bool) or not 0 <= f[key] <= 5000:
             raise ConfigError(f"[follow] {key} must be a whole number from 0 to 5000")
     for key, v in f["weights"].items():

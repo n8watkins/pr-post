@@ -35,19 +35,53 @@ class Inline(unittest.TestCase):
         self.assertIn('href="#"', out)
         self.assertIn('href="https://a.dev/?q=1&amp;r=2"', out)
 
-    def test_email_blocks_script_links(self):
-        out = send_email.inline("[x](javascript:alert(1)) **bold**")
+    def test_email_links_block_script_urls(self):
+        out = send_email.E.link("javascript:alert(1)", "x")
         self.assertNotIn("javascript:", out)
-        self.assertIn("<strong", out)
+        self.assertIn('href="#"', out)
 
 
 class Email(unittest.TestCase):
-    def test_digest_carries_the_paper_name_and_blocks_script_links(self):
-        md = "# Octo: Oct 1 to Oct 7\n\n## TL;DR\n- shipped [a parser](javascript:alert(1))\n- and <b>more</b>\n"
-        page = send_email.render([(md, "x")], "weekly", [("Read on GitHub", "https://github.com/o/r")], "The Test Gazette")
+    WEEKLY = ("# Octo: Oct 1 to Oct 7\n\n## TL;DR\n- Shipped [a parser](javascript:alert(1)) that reads TOML. And more.\n- and <b>more</b>\n\n"
+              "## Where the time went\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n## parser\n**What it is:** long analysis that stays on the web.\n")
+    QUIET = "# Tuber update: Oct 5 to Oct 7\n\nNothing notable since the weekly report.\n"
+
+    def render(self, edition=None, url="https://paper.example/r/2026-10-07-weekly/"):
+        items = [({"id": "octo", "name": "Octo"}, self.WEEKLY, url and url + "#octo"), ({"id": "tuber", "name": "Tuber"}, self.QUIET, url and url + "#tuber")]
+        return send_email.render(items, "weekly", "2026-10-07-weekly", edition, url, [("Read on GitHub", "https://github.com/o/r")], "The Test Gazette")
+
+    def test_digest_is_short_and_safe(self):
+        page, text, subject = self.render()
         self.assertIn("The Test Gazette", page)
-        self.assertNotIn("javascript:", page)
+        self.assertNotIn("javascript:", page + text)
         self.assertNotIn("<b>more</b>", page)
+        # One line per person and the button; the long analysis stays on the web.
+        self.assertIn("Shipped a parser that reads TOML.", page)
+        self.assertNotIn("long analysis", page + text)
+        self.assertNotIn("<details", page)
+        self.assertIn("Read the full edition", page)
+        self.assertIn('href="https://paper.example/r/2026-10-07-weekly/#octo"', page)
+        self.assertIn("Quiet this time", page)
+        self.assertEqual(subject, "Weekly report: 2 people, Oct 1 to Oct 7")
+        self.assertIn("Read the full edition: https://paper.example/r/2026-10-07-weekly/", text)
+
+    def test_tldr_prefers_the_edition(self):
+        page, _, _ = self.render(edition={"tldr": ["Octo ships a **parser**.", "Tuber rests."], "lead": {"headline": "Not this"}})
+        self.assertIn("Octo ships a parser.", page)
+        self.assertNotIn("Not this", page)
+        page, _, _ = self.render(edition={"lead": {"headline": "Parser lands"}, "stories": [{"headline": "Tuber rests"}]})
+        self.assertIn("Parser lands", page)
+
+    def test_without_a_site_there_is_no_button(self):
+        page, _, _ = self.render(url=None)
+        self.assertNotIn("Read the full edition", page)
+
+    def test_works_in_outlook_and_dark_mode(self):
+        page, _, _ = self.render()
+        self.assertIn("<!--[if mso]>", page)
+        self.assertIn("prefers-color-scheme: dark", page)
+        self.assertIn('name="color-scheme" content="light dark"', page)
+        self.assertLess(len(page.encode()), 102_000)  # Gmail clips longer emails
 
 
 class EmailRun(unittest.TestCase):
@@ -78,14 +112,21 @@ class EmailRun(unittest.TestCase):
         preview = self.repo / "digest.html"
         out = self.run_main("--dry-run", "--preview", str(preview), env={"RESEND_API_KEY": "re_test_not_a_key"})
         self.assertIn("Dry run", out)
-        self.assertIn("Weekly Report: Octo Cat: Oct 25 to Oct 31", out)
+        self.assertIn("Weekly report: Octo Cat: Oct 25 to Oct 31", out)
         self.assertIn("RESEND_API_KEY is set", out)
         self.assertNotIn("re_test_not_a_key", out)
         self.assertNotIn("reader@example.com", out)
         page = preview.read_text()
         self.assertIn("The Test Gazette", page)
-        # The GitHub link points into the paper's own repository, not the engine's.
+        # Without [site] url, the link points into the paper's own repository, not the engine's.
         self.assertIn("https://github.com/me/private-paper/blob/main/reports/octo/2026-10-31-weekly.md", page)
+
+    def test_one_email_per_issue(self):
+        other = self.repo / "reports" / "octo" / "2026-10-28-update.md"
+        other.write_text("# Octo Cat update: Oct 27 to Oct 28\n\n- one\n")
+        argv = ["send_email.py", "--paper", str(self.repo), str(self.report), str(other), "--dry-run"]
+        with mock.patch.object(sys, "argv", argv), self.assertRaises(SystemExit):
+            send_email.main()
 
     def test_dry_run_still_respects_email_being_off(self):
         text = (self.repo / "watchlist.toml").read_text().replace("email = true", "email = false")
@@ -222,3 +263,53 @@ class Summaries(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class IssuePage(unittest.TestCase):
+    """The web edition of one writer run: the page the email's button opens."""
+
+    def test_issue_page_has_contents_and_folded_sections(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        paper = write_paper(Path(tmp.name) / "paper", 'mode = "private"')
+        (paper / "reports" / "octo").mkdir(parents=True)
+        (paper / "reports" / "octo" / "2026-10-31-weekly.md").write_text(
+            "# Octo Cat: Oct 25 to Oct 31\n\n## TL;DR\n- Shipped [a parser](https://github.com/octo/p/pull/1).\n\n## parser\n**What it is:** a parser.\n")
+        (paper / "editions").mkdir()
+        (paper / "editions" / "2026-10-31-weekly.json").write_text(
+            '{"date": "2026-10-31", "kind": "weekly", "tldr": ["Octo ships a parser."], "lead": {"id": "octo", "headline": "Parser!", "deck": "", "body": [], "sources": []}, "stories": []}')
+        cfg = config.load(paper)
+        import stats  # noqa: PLC0415
+        snap = stats.build(paper, cfg)
+        (paper / "stats").mkdir()
+        (paper / "stats" / f"{snap['date']}.json").write_text(__import__("json").dumps(snap))
+        out = Path(tmp.name) / "dist"
+        with contextlib.redirect_stdout(io.StringIO()):
+            build_site.build(paper, out)
+        page = (out / "r" / "2026-10-31-weekly" / "index.html").read_text()
+        self.assertIn('<a href="#octo">Octo Cat</a>', page)
+        self.assertIn('<section class="issue-person" id="octo">', page)
+        self.assertIn('<details class="rsect" open><summary>TL;DR</summary>', page)
+        self.assertIn('<details class="rsect"><summary>parser</summary>', page)
+        self.assertIn("Octo ships a parser.", page)
+        self.assertIn("/r/2026-10-31-weekly/", (out / "archive" / "index.html").read_text())
+
+
+class Briefs(unittest.TestCase):
+    def test_brief_is_short_and_never_names_private_repos(self):
+        import brief  # noqa: PLC0415
+        st = {"window": {"start": "2026-10-25", "end": "2026-10-31"}, "public_merged_prs": 1, "opened_prs": 2, "commits": 3, "repos_touched": 2,
+              "releases": [], "videos": [], "births": [], "deaths": [], "contributions": {"public": 5, "private": 7},
+              "repos": [{"repo": "octo/p", "merged_prs": 1, "commits": 3, "private": False}, {"repo": "octo/secret", "merged_prs": 0, "commits": 9, "private": True}]}
+        data = {"collected_at": "2026-10-31T11:00:00Z", "since": "2026-10-23", "github": {
+            "pull_requests": [{"repo": "octo/p", "number": 1, "title": "Parser", "state": "closed", "created": "2026-10-30", "merged": "2026-10-30",
+                               "url": "https://github.com/octo/p/pull/1", "body": "x " * 2000},
+                              {"repo": "octo/secret", "number": 2, "title": "Secret thing", "state": "closed", "created": "2026-10-30", "merged": "2026-10-30",
+                               "url": "https://github.com/octo/secret/pull/2", "body": ""}],
+            "commits": [], "readmes": {"octo/p": "# P\n[![badge](x)](y)\nP parses things."}}}
+        text = brief.brief({"id": "octo", "name": "Octo"}, data, st, "", [])
+        self.assertIn("octo/p#1 Parser", text)
+        self.assertIn("1 private repos", text)
+        self.assertNotIn("secret", text.replace("never describe", ""))
+        self.assertIn("P parses things.", text)
+        self.assertLess(len(text), 2000)

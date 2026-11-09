@@ -99,7 +99,8 @@ To get suggestions instead, turn on `[follow]`: `scripts/follow.py` finds builde
 | `PR_POST_PAPER` | The paper folder when `--paper` is not given (the workflow sets it from the repository variable, default `demo`) |
 | `GITHUB_TOKEN` | GitHub API access; Actions provides one automatically |
 | `PR_POST_SITE_URL`, `PR_POST_BASE_PATH` | Override `[site] url` and `base_path`; the Pages workflow sets them |
-| `RESEND_API_KEY` | Only for `send_email.py` (`--dry-run` checks everything without sending) |
+| `RESEND_API_KEY` | Only for `send_email.py` and `send_follow.py` (`--dry-run` checks everything without sending) |
+| `ACTION_SIGNING_KEY` | Only for one-click buttons in the Who to follow email (`act.py`, the Worker's `/act/` links) |
 
 ## feed.json: show who you follow on your own site
 
@@ -140,7 +141,11 @@ See **[docs/writers.md](docs/writers.md)**.
 | `scripts/build_site.py` | The site, the facts edition and `feed.json` |
 | `scripts/feed.py` | The feed builder, a JSON Schema validator and `--check` |
 | `scripts/config.py` | Loads and validates `watchlist.toml` |
-| `scripts/send_email.py` | Optional email digests of written reports |
+| `scripts/send_email.py` | Optional short email digest of written reports: a TL;DR, one line per person, a button to the web edition |
+| `scripts/send_follow.py` | Optional separate "Who to follow" email with the top five picks |
+| `scripts/brief.py` | A few-kilobyte brief per person for an AI writer, so it reads far fewer tokens than `data/` |
+| `scripts/act.py`, `scripts/act_lib.py` | One-click Follow and Add links from that email: signed, single use, logged |
+| `scripts/digest.py`, `scripts/email_lib.py` | Shared by the emails and the site's issue pages |
 | `scripts/research_person.py` | Drafts a watch list entry and profile for someone new, for review |
 | `scripts/follow.py`, `scripts/follow_lib.py` | Optional "Who to follow": candidates, mini reports, fit scores and weekly picks |
 | `site/assets/` | The newspaper's CSS and JavaScript |

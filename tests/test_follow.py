@@ -1,19 +1,24 @@
 """Who to follow: guardrails, the mini report, scoring, picks, the page and the email. No network."""
 
+import contextlib
 import datetime as dt
 import io
+import re
+import sys
 import json
 import tempfile
 import unittest
 import urllib.error
 from pathlib import Path
+from unittest import mock
 
 import helpers  # noqa: F401  (puts scripts/ on the path)
 import build_site
 import config
 import follow
 import follow_lib as fl
-import send_email
+import act_lib
+import send_follow
 from fixture_paper import write_paper
 
 TODAY = dt.date(2026, 11, 7)
@@ -251,15 +256,32 @@ class Output(unittest.TestCase):
         self.assertFalse((out / "follow").exists())
         self.assertNotIn("Who to follow", (out / "index.html").read_text())
 
-    def test_email_section(self):
+    def test_follow_email(self):
         watch = config.load(self.paper)
         latest, reports = fl.load_latest(self.paper, watch, max_age_days=8)
-        html = send_email.follow_section(latest, reports, "https://paper.example", "https://github.com/me-builder/my-paper")
-        self.assertIn("Who to follow", html.replace("WHO TO FOLLOW", "Who to follow"))
-        self.assertIn("https://paper.example/follow/#jane", html)
-        self.assertIn("Follow on GitHub", html)
+        page, text, subject = send_follow.render(latest, reports, "https://paper.example", "https://github.com/me-builder/my-paper", "", "The Gazette")
+        self.assertIn("Who to follow", subject)
+        self.assertIn("https://paper.example/follow/#jane", page)
+        self.assertIn('href="https://github.com/jane"', page)
+        self.assertIn("Full report", page)
+        self.assertNotIn("/act/", page)  # no signing key: plain links
         stale, _ = fl.load_latest(self.paper, watch, max_age_days=8, today=dt.date.today() + dt.timedelta(days=30))
         self.assertIsNone(stale)
+
+    def test_follow_email_one_click_links_are_signed(self):
+        watch = config.load(self.paper)
+        latest, reports = fl.load_latest(self.paper, watch, max_age_days=8)
+        page, _, _ = send_follow.render(latest, reports, "https://paper.example", None, "k" * 32, "The Gazette")
+        tokens = re.findall(r"https://paper\.example/act/([A-Za-z0-9_.-]+)", page)
+        self.assertEqual(sorted(act_lib.verify("k" * 32, t)["a"] for t in tokens), ["add", "follow"])
+        self.assertNotIn("k" * 32, page)
+
+    def test_follow_email_stays_off_until_turned_on(self):
+        out = io.StringIO()
+        argv = ["send_follow.py", "--paper", str(self.paper), "--dry-run"]
+        with mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(out):
+            send_follow.main()
+        self.assertIn("[follow] email = false", out.getvalue())
 
 
 class Config(unittest.TestCase):

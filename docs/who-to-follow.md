@@ -103,6 +103,26 @@ It writes `follow/latest.json` (scores, breakdowns and picks) and `follow/state.
 
 - **Web edition:** a "Who to follow" page lists the picks, then the other Follow and Maybe candidates, then the Skips, each with its breakdown and mini report.
   It is built only in private mode, because it names people you do not follow yet; set `public_page = true` to build it on a public site too.
-- **Email:** a weekly digest gets a "Who to follow" card with the picks when `follow.py` ran in the last eight days (`email = false` turns it off; `send_email.py --follow on|off` overrides it).
+- **Email:** a separate, short "Who to follow" email (`send_follow.py`) with the top five picks: avatar, name, score with Follow or Maybe, one line on why, their GitHub profile and a "Full report" link to their card on the page.
+  It is off until you set `email = true` under `[follow]`; run it after `follow.py` (the private paper runs it from a workflow that follows the Who to follow run).
+  It only sends picks from a run in the last eight days, and `--dry-run` and `--preview` work as for the digest.
 - **Add to PR Post:** `follow.py --paper . draft <login>` adds their watch-list entry before your own and writes `profiles/<id>.md` from `research_person.py`, for a pull request you review.
   The page copies a one-liner that runs it in a `follow-add.yml` workflow, when the paper has one and `[links] repo` is set.
+
+## One-click Follow and Add from the email
+
+With `ACTION_SIGNING_KEY` set when `send_follow.py` runs and `[site] url` pointing at a private-mode Worker, the email's "Follow on GitHub" and "Add to PR Post" buttons act without opening the site.
+
+- Each button is `<site>/act/<token>`: the action, the GitHub username, an expiry seven days out and a random nonce, signed with HMAC-SHA256 (`scripts/act_lib.py`, mirrored in `worker/lib.js`).
+  No other secret is in the link.
+- Opening the link never acts, because email security scanners and link previews fetch every link.
+  The Worker answers with a small page that posts back to itself (automatically in a browser, or with its button when scripts are off), and only that POST, from the same site, acts.
+  `/act/` is the one path that skips sign-in: the signed token is the credential.
+- The POST starts the paper's `act.yml` workflow with the token.
+  The workflow checks the token again, refuses a nonce already in `follow/actions.jsonl` (single use) and more than `max_follows_per_week` follows in seven days (default 5), acts, and appends a line to that log.
+  Follow and unfollow use a `FOLLOW_GITHUB_TOKEN` secret that can only manage follows; Add runs the same draft as `follow-add.yml` and opens a pull request; nothing lands until you merge it.
+- The result page offers Undo: a fresh signed link for unfollow, or for closing the draft's pull request and deleting its branch.
+- Until it is set up, the page says so and nothing happens: no signing key on the Worker, no `ACTIONS_TOKEN` to start workflows, or (for Follow) no `FOLLOW_GITHUB_TOKEN` secret.
+  The Worker checks that secret's name with the Secrets: read permission; it can never read a value.
+
+The Worker needs `ACTION_SIGNING_KEY` (the same value as the Actions secret) and `ACTIONS_TOKEN`, a fine-grained token for the paper's repository only with Actions: read and write, Contents: read and Secrets: read.

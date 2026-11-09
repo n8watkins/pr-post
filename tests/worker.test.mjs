@@ -85,3 +85,89 @@ test("the Worker serves nothing without sign-in", async () => {
   assert.equal(wrong.status, 401);
   assert.equal(served, false);
 });
+
+// ---------- one-click actions ----------
+
+import worker from "../worker/index.js";
+import { signAction, verifyAction } from "../worker/lib.js";
+
+const KEY = "test-key-0123456789abcdef";
+const SITE = "https://paper.example";
+
+function withGitHub({ secret = 200, log = "" } = {}, run) {
+  const calls = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), method: init.method || "GET" });
+    if (String(url).includes("/actions/secrets/")) return new Response("{}", { status: secret });
+    if (String(url).includes("/contents/follow/actions.jsonl")) return new Response(log, { status: log ? 200 : 404 });
+    if (String(url).includes("/dispatches")) return new Response(null, { status: 204 });
+    return new Response("unexpected", { status: 500 });
+  };
+  return run(calls).finally(() => { globalThis.fetch = real; });
+}
+
+const env = { ACTION_SIGNING_KEY: KEY, ACTIONS_TOKEN: "t", GITHUB_REPO: "me/paper", SITE_PASSWORD: "pw", SITE_TITLE: "The Gazette" };
+// Flip a character in the middle of the signature (the last one may only carry padding bits).
+const tamper = (t) => { const i = t.length - 10; return t.slice(0, i) + (t[i] === "A" ? "B" : "A") + t.slice(i + 1); };
+const act = (token, init) => worker.fetch(new Request(`${SITE}/act/${token}`, init), env);
+
+test("signAction and verifyAction round-trip, and refuse tampering", async () => {
+  const t = await signAction(KEY, "follow", "jane");
+  assert.equal((await verifyAction(KEY, t)).l, "jane");
+  await assert.rejects(verifyAction("other", t));
+  await assert.rejects(verifyAction(KEY, tamper(t)));
+  await assert.rejects(verifyAction(KEY, t, Math.floor(Date.now() / 1000) + 8 * 24 * 3600), /expired/);
+});
+
+test("a GET never acts, needs no sign-in, and shows a page that posts", async () => {
+  const t = await signAction(KEY, "follow", "jane");
+  await withGitHub({}, async (calls) => {
+    const r = await act(t);
+    assert.equal(r.status, 200);
+    const html = await r.text();
+    assert.match(html, /Follow @jane on GitHub\?/);
+    assert.match(html, /<form id="act" method="post">/);
+    assert.match(r.headers.get("Content-Security-Policy"), /script-src 'sha256-/);
+    assert.ok(!calls.some((c) => c.url.includes("/dispatches")));
+  });
+});
+
+test("the POST dispatches the act workflow and offers an undo", async () => {
+  const t = await signAction(KEY, "follow", "jane");
+  await withGitHub({}, async (calls) => {
+    const r = await act(t, { method: "POST", headers: { Origin: SITE } });
+    assert.equal(r.status, 200);
+    const html = await r.text();
+    assert.match(html, /Followed @jane ✓/);
+    const undo = html.match(/href="\/act\/([^"]+)">Undo/)[1];
+    assert.equal((await verifyAction(KEY, undo)).a, "unfollow");
+    assert.ok(calls.some((c) => c.url.endsWith("/repos/me/paper/actions/workflows/act.yml/dispatches") && c.method === "POST"));
+  });
+});
+
+test("a cross-site POST, a used link and a missing follow token all refuse", async () => {
+  const t = await signAction(KEY, "follow", "jane");
+  await withGitHub({}, async (calls) => {
+    assert.equal((await act(t, { method: "POST", headers: { Origin: "https://evil.example" } })).status, 403);
+    assert.equal((await act(t, { method: "POST" })).status, 403);
+    assert.ok(!calls.some((c) => c.url.includes("/dispatches")));
+  });
+  const nonce = (await verifyAction(KEY, t)).n;
+  await withGitHub({ log: `{"nonce":"${nonce}"}\n` }, async () => {
+    assert.match(await (await act(t)).text(), /already used/);
+  });
+  await withGitHub({ secret: 404 }, async () => {
+    const r = await act(t);
+    assert.equal(r.status, 503);
+    assert.match(await r.text(), /Follow isn&#39;t set up yet|Follow isn't set up yet/);
+  });
+});
+
+test("without a signing key or with a bad token nothing happens", async () => {
+  const r = await worker.fetch(new Request(`${SITE}/act/abc.def`), { ...env, ACTION_SIGNING_KEY: "" });
+  assert.equal(r.status, 404);
+  const t = await signAction(KEY, "add", "jane");
+  assert.equal((await worker.fetch(new Request(`${SITE}/act/${t}`), { ...env, ACTION_SIGNING_KEY: "" })).status, 503);
+  assert.equal((await act(tamper(t))).status, 400);
+});

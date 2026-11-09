@@ -144,3 +144,55 @@ export function checkClaims(payload, { aud, teamDomain, now = Date.now() / 1000 
 export function realm(env) {
   return String(env.SITE_TITLE || "pr-post").replace(/["\\\r\n]/g, "").slice(0, 80) || "pr-post";
 }
+
+// ---------- one-click actions (scripts/act_lib.py has the design; the formats must match) ----------
+
+export const ACTIONS = ["follow", "unfollow", "add", "unadd"];
+export const UNDO = { follow: "unfollow", add: "unadd" };
+export const ACTION_LIFETIME = 7 * 24 * 3600;
+const NONCE_RE = /^[0-9a-f]{32}$/;
+
+function b64url(bytes) {
+  let s = "";
+  bytes.forEach((b) => { s += String.fromCharCode(b); });
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function unb64url(text) {
+  const s = atob(text.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (text.length % 4)) % 4));
+  return Uint8Array.from(s, (c) => c.charCodeAt(0));
+}
+
+async function hmacKey(key) {
+  return crypto.subtle.importKey("raw", new TextEncoder().encode(key), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+}
+
+/** A signed link token for `action` on `login`, valid for seven days. */
+export async function signAction(key, action, login, now = Math.floor(Date.now() / 1000)) {
+  if (!key || !ACTIONS.includes(action) || !GITHUB_RE.test(login)) throw new Error("cannot sign that");
+  const nonce = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const body = b64url(new TextEncoder().encode(JSON.stringify({ a: action, l: login, e: now + ACTION_LIFETIME, n: nonce })));
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", await hmacKey(key), new TextEncoder().encode(body)));
+  return `${body}.${b64url(sig)}`;
+}
+
+/** The payload {a, l, e, n} of a valid, unexpired token; throws an Error whose message says why not. */
+export async function verifyAction(key, token, now = Math.floor(Date.now() / 1000)) {
+  if (!key) throw new Error("not set up");
+  if (typeof token !== "string" || token.length > 400 || token.split(".").length !== 2) throw new Error("not a link");
+  const [body, sig] = token.split(".");
+  let ok = false;
+  let payload;
+  try {
+    ok = await crypto.subtle.verify("HMAC", await hmacKey(key), unb64url(sig), new TextEncoder().encode(body));
+    if (ok) payload = JSON.parse(new TextDecoder().decode(unb64url(body)));
+  } catch {
+    throw new Error("not a link");
+  }
+  if (!ok) throw new Error("not a link");
+  if (!payload || !ACTIONS.includes(payload.a) || !GITHUB_RE.test(String(payload.l)) || !Number.isInteger(payload.e) || !NONCE_RE.test(String(payload.n))) {
+    throw new Error("not a link");
+  }
+  if (payload.e < now) throw new Error("expired");
+  return payload;
+}
