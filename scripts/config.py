@@ -37,6 +37,7 @@ SITE_DEFAULTS = {
     "mode": "public",     # "public": anyone can read it (GitHub Pages); "private": served behind sign-in (Cloudflare Worker)
     "show_private_counts": False,  # private mode only: print GitHub's private contribution counts
     "desk": "the facts desk",      # byline on pages built from facts alone
+    "storage": "git",     # private mode: "git" (settings page saves watchlist.toml) or "cloudflare" (People page on D1, docs/private-mode.md)
 }
 WRITER_DEFAULTS = {
     "kind": "none",       # "none", "claude-routine" or "gemini"; only documents who writes, nothing calls an AI here
@@ -221,6 +222,8 @@ def parse(text):
     site = {**SITE_DEFAULTS, **(raw.get("site") or {})}
     if site["mode"] not in ("public", "private"):
         raise ConfigError('[site] mode must be "public" or "private"')
+    if site["storage"] not in ("git", "cloudflare"):
+        raise ConfigError('[site] storage must be "git" or "cloudflare"')
     if site["url"] and not is_http_url(site["url"]):
         raise ConfigError("[site] url must start with http:// or https://")
     site["url"] = site["url"].rstrip("/")

@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  PR_POST_API: ${{ vars.PR_POST_API }}
+  PR_POST_API: ${{ secrets.PR_POST_API }}
   PR_POST_TOKEN: ${{ secrets.JOBS_TOKEN }}
 
 jobs:
