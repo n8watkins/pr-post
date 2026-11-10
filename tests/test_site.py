@@ -215,6 +215,19 @@ class PrivateBuild(unittest.TestCase):
         self.assertIn('content="noindex', html)
         self.assertNotIn(str(PRIVATE_COUNT), str(feed))  # the feed stays public-only
 
+    def test_a_paper_kept_in_cloudflare_gets_the_people_page(self):
+        tmp, _, out, _ = build_fixture('mode = "private"\nstorage = "cloudflare"')
+        self.addCleanup(tmp.cleanup)
+        page = (out / "people" / "index.html").read_text()
+        self.assertIn('id="people-app" data-api="/api/people"', page)
+        self.assertIn('<a href="/people/" aria-current="page">People</a>', page)
+        self.assertFalse((out / "settings").exists())
+        self.assertNotIn("watchlist-data", all_html(out))  # the watch list is fetched after sign-in, never baked into a page
+
+    def test_storage_must_be_known(self):
+        with self.assertRaises(config.ConfigError):
+            config.parse('[site]\nstorage = "s3"\n')
+
     def test_show_private_counts_is_ignored_on_a_public_site(self):
         tmp, _, out, _ = build_fixture("show_private_counts = true")
         self.addCleanup(tmp.cleanup)

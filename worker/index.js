@@ -25,6 +25,7 @@ import { decodeJwt, checkClaims, validatePeople, replacePeople, realm, verifyAct
 import { handleStore, serveSite, saveActivePeople, actionUsed, serveOwnerFile } from "./store.js";
 import { handleSesEvents } from "./sns.js";
 import { handleJobs, scheduled, dispatch, createRequest } from "./jobs.js";
+import { handlePeople } from "./people.js";
 
 const SECURITY_HEADERS = {
   "X-Robots-Tag": "noindex, nofollow",
@@ -307,11 +308,15 @@ export default {
       if (request.method === "PUT") return saveWatchlist(request, env, auth.user);
       return json(405, { error: "Use PUT." });
     }
+    const people = await handlePeople(request, env, url, auth.user);
+    if (people) return withHeaders(people);
     if (url.pathname.startsWith("/api/")) {
       const stored = await handleStore(request, env, url, "owner");
       return stored ? withHeaders(stored) : json(404, { error: "Not found." });
     }
     if (url.pathname.startsWith("/files/") && env.STORE) return withHeaders(await serveOwnerFile(request, env, url));
+    // With D1 the watch list is edited on the People page; old links to the settings page land there.
+    if (env.DB && /^\/settings\/?$/.test(url.pathname)) return withHeaders(new Response(null, { status: 308, headers: { Location: "/people/" } }));
     if (env.STORE) return withHeaders(await serveSite(request, env));
     return withHeaders(await env.ASSETS.fetch(request));
   },

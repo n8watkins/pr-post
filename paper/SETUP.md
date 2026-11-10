@@ -14,7 +14,7 @@ Values never go in this repository or in a chat: secrets go through `pass-env` (
 | `ACTIONS_TOKEN` | Secret | Worker | Owner (step C2) |
 | `FOLLOW_GITHUB_TOKEN` | Secret | Actions | Owner (step C1) |
 | `CLOUDFLARE_API_TOKEN` | Secret | Actions | Owner, optional (step C3) |
-| `PR_POST_API` | Variable | Actions, and the routine's environment | The Worker's address |
+| `PR_POST_API` | Secret (so run logs mask it) | Actions, and the routine's environment | The Worker's address |
 | `AWS_SES_ROLE_ARN` | Variable | Actions | Agent, from the SES stack's outputs |
 | `SES_TOPIC_ARN` | Variable | Worker (`wrangler.jsonc` or `--var`) | Agent, from the SES stack's outputs |
 | `PAPER_DEPLOY_LIVE` | Variable | Actions | `true` once the live Worker runs this code |

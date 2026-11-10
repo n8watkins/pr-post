@@ -1,0 +1,52 @@
+# The owner's paper: draft someone new from the People page. The Worker starts
+# this run with an opaque request id (inputs are public here); the run fetches
+# the GitHub username with JOBS_TOKEN, drafts their watch-list entry and
+# profile with follow.py draft (research_person.py), and saves it as a draft
+# that waits on the People page with its "Still to check" list. Nothing joins
+# the watch list until the owner approves it there.
+name: "Paper: draft a person"
+
+on:
+  workflow_dispatch:
+    inputs:
+      request:
+        description: "Request id from the Worker"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paper-people
+  cancel-in-progress: false
+
+env:
+  PR_POST_API: ${{ secrets.PR_POST_API }}
+  PR_POST_TOKEN: ${{ secrets.JOBS_TOKEN }}
+
+jobs:
+  draft:
+    if: github.repository == 'n8watkins/pr-post'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/paper
+      - name: Pull the paper and the request
+        env:
+          REQUEST: ${{ inputs.request }}
+        run: |
+          python3 scripts/store.py pull "$WORK"
+          python3 scripts/store.py request "$REQUEST" "$RUNNER_TEMP/login"
+          echo "::add-mask::$(cat "$RUNNER_TEMP/login")"
+      - name: Draft
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: paper/bin/quiet python3 scripts/follow.py --paper "$WORK" draft "$(cat "$RUNNER_TEMP/login")"
+      - name: Save the draft
+        run: python3 scripts/store.py push "$WORK" --no-files
+      - name: Store the log
+        if: always()
+        run: python3 scripts/store.py put "$PAPER_LOG" "logs/$GITHUB_RUN_ID-people.log"

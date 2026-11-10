@@ -353,7 +353,9 @@ def rail(people, snaps, current=None, page=None):
     pages = [("front", "/", "Front page"), ("archive", "/archive/", "Back issues")]
     if HAS_FOLLOW:
         pages.append(("follow", "/follow/", "Who to follow"))
-    if SITE["mode"] == "private":
+    if SITE["mode"] == "private" and SITE["storage"] == "cloudflare":
+        pages.append(("people", "/people/", "People"))
+    elif SITE["mode"] == "private":
         pages.append(("settings", "/settings/", "People and settings"))
     nav = "".join(f'<a href="{u(href)}"{" aria-current=\"page\"" if page == key else ""}>{label}</a>' for key, href, label in pages)
     legend = ('<span class="legend"><span class="sw pub"></span>public</span> &nbsp; <span class="legend"><span class="sw priv"></span>private</span><br>'
@@ -818,6 +820,20 @@ def settings_page(people):
 <script type="application/json" id="watchlist-data">{data}</script>"""
 
 
+def people_page():
+    """The People page of a paper kept in Cloudflare: a shell that app.js fills from the Worker's /api/people."""
+    return """<h1 class="page-hed">People</h1>
+<p class="page-sub">Who the paper follows. Changes save as you make them, and the next collection uses them; back issues always stay.</p>
+<div id="people-app" data-api="/api/people" aria-live="polite"><p class="muted">Loading the watch list…</p></div>
+<div class="sect">Follow someone new</div>
+<form class="add-form" id="people-add" autocomplete="off">
+  <label class="wide">GitHub username or profile link<input name="github" id="people-add-github" required autocomplete="off" placeholder="e.g. simonw"></label>
+  <div class="wide"><button class="btn solid" type="submit">Research and draft them</button>
+  <span class="status" id="people-add-status" role="status"></span></div>
+</form>
+<p class="muted people-help">A job looks them up on GitHub and drafts their entry and profile with a list of things to check. Approve the draft to start following them.</p>"""
+
+
 # ---------- who to follow ----------
 
 PART_LABELS = {"stack": "Stack overlap", "activity": "Activity", "quality": "Quality", "relevance": "Your interests", "network": "Your network"}
@@ -935,7 +951,9 @@ def build(paper, out):
     if HAS_FOLLOW:
         write("follow/index.html", layout(f"Who to follow · {PAPER}", sheet(follow_page(follow_latest, follow_reports, cfg["links"].get("repo"))),
                                           order, snaps, page="follow", description=f"Who to follow: builders suggested for {PAPER}."))
-    if SITE["mode"] == "private":
+    if SITE["mode"] == "private" and SITE["storage"] == "cloudflare":
+        write("people/index.html", layout(f"People · {PAPER}", sheet(people_page()), order, snaps, page="people"))
+    elif SITE["mode"] == "private":
         write("settings/index.html", layout(f"People and settings · {PAPER}", sheet(settings_page(people)), order, snaps, page="settings"))
     write("404.html", layout(f"Not found · {PAPER}", sheet(f'<h1 class="page-hed">Page not found</h1><p class="page-sub"><a href="{u("/")}">Back to the front page</a></p>'), order, snaps))
 

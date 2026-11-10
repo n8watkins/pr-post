@@ -388,3 +388,22 @@ footer.colophon { max-width: 1120px; margin: 22px auto 0; font-family: var(--mon
   .tldr ul { font-size: 18px; }
   .rsect > .prose { padding-left: 0; }
 }
+
+/* ---------- people (a paper kept in Cloudflare) ---------- */
+.people-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+.people-row > .people-more, .people-row > .people-edit { grid-column: 1 / -1; }
+.people-more summary { cursor: pointer; font-family: var(--mono); font-size: 13px; letter-spacing: .04em; color: var(--ink-soft); }
+.people-profile { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); font-size: 13px; line-height: 1.55; background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; margin: 8px 0 4px; max-height: 420px; overflow-y: auto; }
+.people-edit { margin: 6px 0 4px; padding: 14px; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper); }
+.people-edit textarea { font: 15px var(--mono); padding: 9px 11px; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); color: var(--ink); resize: vertical; }
+.people-edit input { background: var(--sheet); }
+.add-form label.check { display: flex; align-items: center; gap: 8px; }
+.people-changes { margin-top: 36px; }
+.people-changes ul { list-style: none; padding: 0; margin: 10px 0 0; font-size: 16px; }
+.people-changes li { padding: 4px 0; border-bottom: 1px solid var(--rule); }
+.people-help { font-size: 16px; margin-top: 10px; }
+#people-add .wide { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+@media (max-width: 720px) {
+  .people-row { grid-template-columns: auto minmax(0, 1fr); }
+  .people-row .set-actions { grid-column: 1 / -1; justify-content: flex-start; }
+}
