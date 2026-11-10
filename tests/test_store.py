@@ -146,6 +146,24 @@ class EndToEndTest(unittest.TestCase):
         store.push(api, fresh, dirs=("data",), delete=True, say=self.say)
         self.assertIn("(removed 1)", self.said[-1])
 
+    def test_a_drafted_person_waits_for_the_owner(self):
+        api = self.api()
+        work = self.root / "work"
+        store.pull(api, work, say=self.say)
+        with open(work / "watchlist.toml", "a") as f:
+            f.write('\n[[people]]\ngithub = "Dee"\nname = "Dee"\n')
+        (work / "profiles" / "dee.md").write_text("# Dee\n## Still to check\n- socials\n")
+        store.push(api, work, dirs=(), say=self.say)
+        self.assertEqual(self.said[-1], "Pushed 0 files, 0 profiles, 0 follow candidates (0 removed), 0 logged actions, 1 new drafts.")
+        _, wl = api.json("GET", "/api/paper/watchlist")
+        self.assertEqual({p["id"]: p["status"] for p in wl["people"]}, {"ada": "active", "bob": "paused", "cy": "draft", "dee": "draft"})
+        fresh = self.root / "fresh"
+        store.pull(api, fresh, say=self.say)
+        self.assertNotIn("Dee", (fresh / "watchlist.toml").read_text())  # drafts are not collected or written about
+        (fresh / "discard.json").write_text('["dee"]')
+        store.push(api, fresh, dirs=(), say=self.say)
+        self.assertIn("1 drafts discarded", self.said[-1])
+
     def test_writer_lane(self):
         jobs = self.api()
         work = self.root / "work"

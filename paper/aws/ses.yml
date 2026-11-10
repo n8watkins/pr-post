@@ -41,8 +41,8 @@ Parameters:
     Description: '"false" if IAM, Identity providers already lists token.actions.githubusercontent.com.'
   EventsEndpoint:
     Type: String
-    Default: https://pull-request-post.nathancwatkins23.workers.dev/api/ses/events
-    Description: Where SNS posts bounce and complaint events (the Worker checks every signature).
+    AllowedPattern: "^https://.+/api/ses/events$"
+    Description: Where SNS posts bounce and complaint events, https://<the paper's Worker>/api/ses/events (the Worker checks every signature).
 
 Conditions:
   CreateOidc: !Equals [!Ref CreateGitHubOidcProvider, "true"]

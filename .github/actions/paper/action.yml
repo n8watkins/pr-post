@@ -1,0 +1,17 @@
+# Shared setup for the owner's paper workflows (paper-*.yml): Python, where the
+# working copy of the paper goes, and the log file paper/bin/quiet writes to.
+# The paper itself lives in Cloudflare (docs/private-mode.md); each job pulls
+# it with scripts/store.py and pushes back what changed.
+name: Paper setup
+description: Set up Python and the paper's working folder and log.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v7
+      with:
+        python-version: "3.12"
+    - shell: bash
+      run: |
+        echo "WORK=$RUNNER_TEMP/paper" >> "$GITHUB_ENV"
+        echo "PAPER_LOG=$RUNNER_TEMP/paper.log" >> "$GITHUB_ENV"
+        : > "$RUNNER_TEMP/paper.log"

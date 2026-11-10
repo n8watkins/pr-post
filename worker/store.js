@@ -25,6 +25,7 @@
 // below the Workers free plan's per-request query limit.
 
 import { suppressedList } from "./sns.js";
+import { validatePeople } from "./lib.js";
 
 export const PATH_RE = /^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$/;
 const LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
@@ -137,6 +138,36 @@ export async function saveActivePeople(env, people, who) {
       ON CONFLICT (id) DO UPDATE SET status = 'active', position = excluded.position, entry = excluded.entry, updated_at = excluded.updated_at`).bind(list, at),
     env.DB.prepare("INSERT INTO changes (at, who, what) VALUES (?1, ?2, ?3)").bind(at, who, `watch list saved: ${people.length} active people`),
   ]);
+}
+
+// ---------- drafts: people suggested by a job, waiting for the owner ----------
+
+async function addDraft(request, env) {
+  let body;
+  try { body = await readJson(request); } catch (err) { return reply(400, { error: err.message }); }
+  let person;
+  try { [person] = validatePeople({ people: [body && body.entry] }); } catch (err) { return reply(400, { error: err.message }); }
+  const profile = String((body && body.profile) || "");
+  if (profile.length > MAX_PROFILE) return reply(413, { error: "That profile is too large." });
+  const at = now();
+  const [ins] = await env.DB.batch([
+    env.DB.prepare(`INSERT INTO people (id, status, position, entry, profile, note, created_at, updated_at)
+      VALUES (?1, 'draft', (SELECT COALESCE(MAX(position), -1) + 1 FROM people), ?2, ?3, ?4, ?5, ?5) ON CONFLICT (id) DO NOTHING`)
+      .bind(person.id, JSON.stringify(person), profile, String((body && body.note) || "").slice(0, 2000), at),
+    env.DB.prepare("INSERT INTO changes (at, who, what) SELECT ?1, 'jobs', ?2 WHERE changes() > 0").bind(at, `draft ${person.id} added`),
+  ]);
+  if (!ins.meta.changes) return reply(409, { error: "That person is already on the watch list (active, paused or a draft)." });
+  return reply(200, { ok: true, id: person.id });
+}
+
+async function discardDraft(env, id) {
+  if (!ID_RE.test(id)) return reply(400, { error: "Not a person id." });
+  const at = now();
+  const [del] = await env.DB.batch([
+    env.DB.prepare("DELETE FROM people WHERE id = ?1 AND status = 'draft'").bind(id),
+    env.DB.prepare("INSERT INTO changes (at, who, what) SELECT ?1, 'jobs', ?2 WHERE changes() > 0").bind(at, `draft ${id} discarded`),
+  ]);
+  return reply(del.meta.changes ? 200 : 404, del.meta.changes ? { ok: true } : { error: "No draft with that id." });
 }
 
 // ---------- profiles ----------
@@ -326,6 +357,13 @@ export async function handleStore(request, env, url, role) {
     return reply(405, { error: "Not allowed." });
   }
 
+  if (p === "/api/paper/people/drafts" && m === "POST") {
+    return role === "jobs" ? addDraft(request, env) : reply(403, { error: "Not allowed." });
+  }
+  if (p.startsWith("/api/paper/people/drafts/") && m === "DELETE") {
+    return role === "jobs" ? discardDraft(env, rest("/api/paper/people/drafts/")) : reply(403, { error: "Not allowed." });
+  }
+
   if (p === "/api/paper/emailed") {
     if (role === "writer") return reply(403, { error: "Not allowed." });
     if (m === "GET") return reply(200, { items: await readEmailed(env) });
@@ -373,6 +411,17 @@ export async function serveSite(request, env) {
   const headers = { "Content-Type": contentType(key), ETag: obj.httpEtag };
   if (!("body" in obj) || !obj.body) return new Response(null, { status: 304, headers });
   return new Response(request.method === "HEAD" ? null : obj.body, { headers });
+}
+
+/** /files/<path>: a paper file for the signed-in owner, such as a job's log or an email preview, shown in the browser. */
+export async function serveOwnerFile(request, env, url) {
+  let path;
+  try { path = decodeURIComponent(url.pathname.slice("/files/".length)); } catch { return new Response("Bad path", { status: 400 }); }
+  if (!paperAllowed("owner", path, false)) return notFound(env, request);
+  const obj = await env.STORE.get(`paper/${path}`);
+  if (!obj) return notFound(env, request);
+  const type = /\.(log|jsonl)$/.test(path) ? "text/plain; charset=utf-8" : contentType(path);
+  return new Response(obj.body, { headers: { "Content-Type": type } });
 }
 
 async function notFound(env, request) {

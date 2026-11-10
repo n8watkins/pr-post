@@ -12,11 +12,20 @@ folder, so a job pulls one, runs them, and pushes back what changed:
     python3 scripts/store.py push work/              # upload only what changed
     python3 scripts/store.py site dist/              # publish the built site (uploads changes, removes stale pages)
     python3 scripts/store.py put work/logs/x.log logs/x.log   # one file
+    python3 scripts/store.py request ID work/.request          # a job's payload from the Worker (see worker/jobs.js)
+    python3 scripts/store.py publish                         # ask the Worker to start the publish job
+
+A job may add people as drafts for the owner to review: new [[people]] blocks
+in watchlist.toml (follow.py draft writes them) are sent as drafts with their
+profiles, and ids listed in discard.json remove drafts. Existing people are
+only ever changed on the site.
 
 PR_POST_API is the Worker's address and PR_POST_TOKEN its JOBS_TOKEN or
 WRITER_TOKEN; the Worker decides what each may read and write. Output is
 counts only, never file names or people, because Actions logs on a public
-repository are public; --verbose lists paths for local use.
+repository are public; --verbose lists paths for local use. In GitHub Actions,
+pull also masks every person's id, username and name and the email address,
+so a stray line from another script cannot show them either.
 No dependencies.
 """
 
@@ -26,6 +35,7 @@ import json
 import os
 import re
 import sys
+import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -185,6 +195,20 @@ def load_snapshot(work):
         return {}
 
 
+def mask(wl, env=None):
+    """In GitHub Actions, tell the runner to hide every watched person and the email address in all later log lines."""
+    env = os.environ if env is None else env
+    if env.get("GITHUB_ACTIONS") != "true":
+        return
+    values = set()
+    for p in wl.get("people", []):
+        e = p.get("entry", {})
+        values.update([p.get("id"), e.get("github"), e.get("name"), e.get("id")])
+    values.add((wl.get("settings", {}).get("email") or {}).get("to"))
+    for v in sorted(x for x in values if isinstance(x, str) and len(x) >= 3):
+        print(f"::add-mask::{v}")
+
+
 # ---------- pull ----------
 
 def pull(api, work, say=print):
@@ -193,7 +217,9 @@ def pull(api, work, say=print):
     snap = {"files": {}, "profiles": {}, "follow": None, "actions": None, "emailed": None}
 
     _, wl = api.json("GET", "/api/paper/watchlist")
+    mask(wl)
     active = [p["entry"] for p in wl["people"] if p["status"] == "active"]
+    snap["people"] = [p["id"] for p in wl["people"]]
     (work / "watchlist.toml").write_text(render_watchlist(wl["settings"], active))
 
     _, prof = api.json("GET", "/api/paper/profiles")
@@ -345,17 +371,47 @@ def push_emailed(api, work, snap):
     return len(new)
 
 
+def push_drafts(api, work, snap):
+    """New [[people]] in watchlist.toml become drafts; ids in discard.json lose theirs. Returns (added, discarded)."""
+    work = Path(work)
+    known = set(snap.get("people") or [])
+    added = discarded = 0
+    path = work / "watchlist.toml"
+    if path.is_file() and snap.get("people") is not None:
+        for entry in tomllib.loads(path.read_text()).get("people", []):
+            pid = (entry.get("id") or entry.get("github") or "").lower()
+            if not pid or pid in known:
+                continue
+            prof = work / "profiles" / f"{pid}.md"
+            note = "Drafted by a job; work through the profile's \"Still to check\" list before approving."
+            status, _ = api.json("POST", "/api/paper/people/drafts",
+                                 {"entry": entry, "profile": prof.read_text() if prof.is_file() else "", "note": note}, ok=(200, 409))
+            added += status == 200
+            known.add(pid)
+            snap.setdefault("profiles", {})[pid] = sha256(prof.read_bytes()) if prof.is_file() else ""
+    discard = work / "discard.json"
+    if discard.is_file():
+        for pid in json.loads(discard.read_text()):
+            status, _ = api.json("DELETE", "/api/paper/people/drafts/" + quote(str(pid)), ok=(200, 404))
+            discarded += status == 200
+        discard.unlink()
+    snap["people"] = sorted(known)
+    return added, discarded
+
+
 def push(api, work, dirs=PAPER_DIRS, delete=False, verbose=False, say=print):
     snap = load_snapshot(work)
     if not snap:
         raise StoreError(f"{work} was not pulled with store.py, so there is nothing to compare with.")
     files, removed = push_files(api, work, dirs, delete, verbose)
+    drafts, discarded = push_drafts(api, work, snap)
     profiles = push_profiles(api, work, snap)
     follow, gone = push_follow(api, work, snap)
     actions = push_actions(api, work, snap)
     emailed = push_emailed(api, work, snap)
     say(f"Pushed {files} files" + (f" (removed {removed})" if delete else "") + f", {profiles} profiles, "
-        f"{follow} follow candidates ({gone} removed), {actions} logged actions" + (f", {emailed} emailed reports" if emailed else "") + ".")
+        f"{follow} follow candidates ({gone} removed), {actions} logged actions" + (f", {emailed} emailed reports" if emailed else "")
+        + (f", {drafts} new drafts" if drafts else "") + (f", {discarded} drafts discarded" if discarded else "") + ".")
     # What was just pushed is the new baseline.
     new = pull_snapshot_after_push(work, snap)
     (Path(work) / SNAPSHOT).write_text(json.dumps(new))
@@ -414,6 +470,21 @@ def put_one(api, local, remote_path):
     print("Stored 1 file.")
 
 
+def fetch_request(api, rid, out):
+    """Write a job's payload (worker/jobs.js) to `out`, and print only its kind."""
+    if not re.fullmatch(r"[0-9a-f]{32}", rid or ""):
+        raise StoreError("Not a request id.")
+    _, body = api.json("GET", f"/api/jobs/requests/{rid}")
+    Path(out).write_text(body["payload"])
+    print(f"Request: {body['kind']}.")
+    return body["kind"]
+
+
+def publish(api):
+    status, body = api.json("POST", "/api/jobs/publish", ok=(202, 503))
+    print("The publish job is starting." if status == 202 else f"Not started: {body.get('error')} {body.get('fallback', '')}".strip())
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--verbose", action="store_true", help="list file paths (not for public logs)")
@@ -423,17 +494,22 @@ def main(argv=None):
     pp.add_argument("work")
     pp.add_argument("--only", help="comma-separated folders to push files from (default: all)")
     pp.add_argument("--delete", action="store_true", help="remove stored files missing from those folders")
+    pp.add_argument("--no-files", action="store_true", help="push only the database parts (drafts, profiles, follow state, action log, emailed)")
     sub.add_parser("site").add_argument("dist")
     put = sub.add_parser("put")
     put.add_argument("local")
     put.add_argument("remote")
+    req = sub.add_parser("request")
+    req.add_argument("id")
+    req.add_argument("out")
+    sub.add_parser("publish")
     args = ap.parse_args(argv)
     try:
         api = Api(verbose=args.verbose)
         if args.cmd == "pull":
             pull(api, args.work)
         elif args.cmd == "push":
-            dirs = tuple(d for d in (args.only.split(",") if args.only else PAPER_DIRS) if d)
+            dirs = () if args.no_files else tuple(d for d in (args.only.split(",") if args.only else PAPER_DIRS) if d)
             bad = [d for d in dirs if d not in PAPER_DIRS]
             if bad:
                 raise StoreError(f"Not a paper folder: {', '.join(bad)}")
@@ -442,6 +518,10 @@ def main(argv=None):
             publish_site(api, args.dist, args.verbose)
         elif args.cmd == "put":
             put_one(api, args.local, args.remote)
+        elif args.cmd == "request":
+            fetch_request(api, args.id, args.out)
+        elif args.cmd == "publish":
+            publish(api)
     except StoreError as e:
         sys.exit(f"store.py: {e}")
 

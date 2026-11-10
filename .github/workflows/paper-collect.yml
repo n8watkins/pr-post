@@ -1,0 +1,57 @@
+# The owner's paper: collect everyone's public GitHub and YouTube activity,
+# compute the stats and write the writer's briefs, then publish the site.
+# Everything private stays in Cloudflare: the job pulls the paper with
+# scripts/store.py, runs the engine, and pushes back only what changed. Engine
+# output goes to a log stored in the paper, not to this public log.
+#
+# Started on time by the Worker's cron (Wed + Sat 11:00 UTC, worker/jobs.js),
+# or by hand. paper/SETUP.md has the setup.
+name: "Paper: collect"
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paper-collect
+  cancel-in-progress: false
+
+env:
+  PR_POST_API: ${{ vars.PR_POST_API }}
+  PR_POST_TOKEN: ${{ secrets.JOBS_TOKEN }}
+
+jobs:
+  collect:
+    if: github.repository == 'n8watkins/pr-post'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/paper
+      - name: Pull the paper
+        run: python3 scripts/store.py pull "$WORK"
+      - name: Collect, stats and briefs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          paper/bin/quiet python3 scripts/collect.py --paper "$WORK"
+          paper/bin/quiet python3 scripts/stats.py --paper "$WORK"
+          paper/bin/quiet python3 scripts/brief.py --paper "$WORK"
+      - name: Push what changed
+        run: python3 scripts/store.py push "$WORK" --only data,stats,briefs
+      - name: Store the log
+        if: always()
+        run: python3 scripts/store.py put "$PAPER_LOG" "logs/$GITHUB_RUN_ID-collect.log"
+
+  publish:
+    needs: collect
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/paper-publish.yml
+    secrets: inherit

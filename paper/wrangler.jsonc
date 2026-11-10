@@ -31,6 +31,10 @@
   ],
   "r2_buckets": [{ "binding": "STORE", "bucket_name": "pr-post-paper" }],
   "observability": { "enabled": true },
+  // The clock for the paper's GitHub Actions jobs (worker/jobs.js): collect on
+  // Wednesdays and Saturdays at 11:00 UTC, publish as a backstop after the
+  // writer's 16:00 run. Add "0 10 * * 6" to start Who to follow on Saturdays.
+  "triggers": { "crons": ["0 11 * * 3,6", "30 17,20 * * 3,6"] },
   "env": {
     // A second Worker on the same storage that serves the site from site-next/,
     // for checking a change end to end before the live paper gets it.
@@ -49,7 +53,8 @@
         { "binding": "DB", "database_name": "pr-post", "database_id": "2b4ca910-88b0-494b-a51d-a0c6da9a8869", "migrations_dir": "migrations" }
       ],
       "r2_buckets": [{ "binding": "STORE", "bucket_name": "pr-post-paper" }],
-      "observability": { "enabled": true }
+      "observability": { "enabled": true },
+      "triggers": { "crons": [] }
     }
   }
 }
