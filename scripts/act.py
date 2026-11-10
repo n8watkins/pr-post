@@ -7,12 +7,22 @@ Usage, from the paper's act.yml workflow:
     python3 scripts/act.py --paper DIR github unfollow LOGIN
     python3 scripts/act.py --paper DIR log TOKEN ok|failed|refused [DETAIL]
     python3 scripts/act.py --paper DIR sign ACTION LOGIN    # print a link, for testing
+    python3 scripts/act.py --paper DIR run TOKEN_FILE       # a paper pulled by store.py: check, act and log in one go
+
+`run` is for a paper kept in Cloudflare (docs/private-mode.md). It reads the
+link from a file (store.py request writes it), so the link never appears in a
+public log, masks the login, checks the link and the limits, acts, and appends
+the result to follow/actions.jsonl for store.py push. Add drafts the person
+into watchlist.toml (follow.py draft), which push sends as a draft for the
+People page; Undo of an Add lists them in discard.json. It exits 1 when the
+action was refused or failed, after logging it.
 
 ACTION_SIGNING_KEY must be set for check, log and sign. Nothing here prints a
 key or a token's signature.
 """
 
 import argparse
+import json
 import os
 import sys
 import urllib.error
@@ -50,6 +60,35 @@ def follow_api(verb, login):
         sys.exit(f"GitHub refused to {verb} {login} ({e.code}). The token needs the Followers: write account permission.")
 
 
+def run(paper, key, token_file):
+    """Check, act and log one link on a pulled paper. Returns the exit code."""
+    try:
+        payload = act_lib.verify(key, Path(token_file).read_text().strip())
+    except (OSError, act_lib.TokenError) as e:
+        print(f"Refusing the link: {e}.")
+        return 1
+    action, login = payload["a"], payload["l"]
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"::add-mask::{login}")
+    cfg = config.load(paper)
+    why = act_lib.refusal(act_lib.read_log(paper), payload, cfg["follow"]["max_follows_per_week"])
+    result, detail = ("refused", why) if why else ("ok", "")
+    if not why:
+        try:
+            if action in ("follow", "unfollow"):
+                follow_api(action, login)
+            elif action == "add":
+                import follow  # noqa: PLC0415 (only Add needs the research code)
+                follow.draft(paper, cfg, login)
+            elif action == "unadd":
+                (Path(paper) / "discard.json").write_text(json.dumps([login.lower()]))
+        except SystemExit as e:
+            result, detail = "failed", str(e.code or "failed")
+    act_lib.append(paper, act_lib.entry(payload, result, detail))
+    print(f"{action}: {result}" + (f" ({detail})" if detail else ""))
+    return 0 if result == "ok" else 1
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--paper")
@@ -66,6 +105,8 @@ def main():
     s = sub.add_parser("sign")
     s.add_argument("action", choices=act_lib.ACTIONS)
     s.add_argument("login")
+    r = sub.add_parser("run")
+    r.add_argument("token_file")
     args = ap.parse_args()
 
     paper = config.paper_dir(args.paper)
@@ -76,6 +117,8 @@ def main():
         return follow_api(args.verb, args.login)
     if not key:
         sys.exit("ACTION_SIGNING_KEY is not set.")
+    if args.cmd == "run":
+        sys.exit(run(paper, key, args.token_file))
     if args.cmd == "sign":
         site = config.load(paper)["site"]["url"]
         print(act_lib.url(site or "https://example.invalid", act_lib.sign(key, args.action, args.login)))

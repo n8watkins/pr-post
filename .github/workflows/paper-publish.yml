@@ -1,0 +1,90 @@
+# The owner's paper: build the site from the paper in Cloudflare and publish it
+# behind the Worker's sign-in, then email every new issue of reports as one
+# short digest each, through Amazon SES (docs/email.md).
+#
+# Started by the Claude routine when its reports are in (store.py publish), as
+# a backstop by the Worker's cron (Wed + Sat 17:30 and 20:30 UTC), after each
+# collection, or by hand. Each report is emailed once (emailed.json in D1).
+# "Dry run" renders the email into the paper's previews/ and sends nothing.
+name: "Paper: publish"
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: build and publish the site, render the email into previews/, send nothing"
+        type: boolean
+        default: false
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paper-publish
+  cancel-in-progress: false
+
+env:
+  PR_POST_API: ${{ vars.PR_POST_API }}
+  PR_POST_TOKEN: ${{ secrets.JOBS_TOKEN }}
+
+jobs:
+  site:
+    if: github.repository == 'n8watkins/pr-post'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/paper
+      - name: Pull the paper
+        run: python3 scripts/store.py pull "$WORK"
+      - name: Build and check
+        run: |
+          paper/bin/quiet python3 scripts/build_site.py --paper "$WORK" --out "$RUNNER_TEMP/dist"
+          paper/bin/quiet python3 scripts/feed.py --check "$RUNNER_TEMP/dist/feed.json"
+      - name: Publish the site
+        run: python3 scripts/store.py site "$RUNNER_TEMP/dist"
+      - name: Store the log
+        if: always()
+        run: python3 scripts/store.py put "$PAPER_LOG" "logs/$GITHUB_RUN_ID-publish-site.log"
+
+  email:
+    needs: site
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The SES role trusts only jobs in this environment, which only main may use.
+    environment: email
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/paper
+      - name: Pull the paper
+        run: python3 scripts/store.py pull "$WORK"
+      - name: AWS credentials for SES (one hour, send-only)
+        if: vars.AWS_SES_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_SES_ROLE_ARN }}
+          aws-region: us-east-1
+          role-duration-seconds: 900
+      - name: Email new issues
+        env:
+          DRY_RUN: ${{ inputs.dry_run && 'true' || '' }}
+        run: |
+          paper/bin/quiet python3 scripts/send_email.py --paper "$WORK" --unsent ${DRY_RUN:+--dry-run --preview "$RUNNER_TEMP/digest.html"}
+          if [ -n "$DRY_RUN" ] && [ -f "$RUNNER_TEMP/digest.html" ]; then
+            python3 scripts/store.py put "$RUNNER_TEMP/digest.html" "previews/$GITHUB_RUN_ID-digest.html"
+            echo "The rendered email is on the site at /files/previews/$GITHUB_RUN_ID-digest.html"
+          fi
+      - name: Record what was emailed
+        if: ${{ !inputs.dry_run }}
+        run: python3 scripts/store.py push "$WORK" --no-files
+      - name: Store the log
+        if: always()
+        run: python3 scripts/store.py put "$PAPER_LOG" "logs/$GITHUB_RUN_ID-publish-email.log"

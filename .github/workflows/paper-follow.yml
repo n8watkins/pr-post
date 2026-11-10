@@ -1,0 +1,85 @@
+# The owner's paper: Who to follow (docs/who-to-follow.md). Finds builders the
+# owner does not follow yet, writes a one-time mini report on each new one,
+# scores everyone and records this week's picks, then publishes the site.
+# Read-only on GitHub: it never follows anyone; one-click follows from the
+# email go through paper-act.yml.
+#
+# The Worker's cron starts it on Saturdays at 10:00 UTC once the owner turns
+# that trigger on (paper/SETUP.md); until then, run it by hand. "Dry run"
+# scores without recording anything and stores the page in previews/.
+name: "Paper: who to follow"
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: research and score, record nothing, store the page in previews/"
+        type: boolean
+        default: false
+      email:
+        description: "Then send the Who to follow email (the Worker's Saturday cron sets this; it still needs [follow] email = true)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paper-follow
+  cancel-in-progress: false
+
+env:
+  PR_POST_API: ${{ vars.PR_POST_API }}
+  PR_POST_TOKEN: ${{ secrets.JOBS_TOKEN }}
+
+jobs:
+  follow:
+    if: github.repository == 'n8watkins/pr-post'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      recorded: ${{ steps.push.outcome }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/paper
+      - name: Pull the paper
+        run: python3 scripts/store.py pull "$WORK"
+      - name: Find, research and score
+        env:
+          # A dedicated token if one is set, else the workflow's own (read-only use either way).
+          GITHUB_TOKEN: ${{ secrets.FOLLOW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run && 'true' || '' }}
+        run: |
+          paper/bin/quiet python3 scripts/follow.py --paper "$WORK" run ${DRY_RUN:+--preview}
+          if [ -n "$DRY_RUN" ]; then
+            paper/bin/quiet python3 scripts/build_site.py --paper "$WORK" --out "$RUNNER_TEMP/dist"
+            python3 scripts/store.py put "$RUNNER_TEMP/dist/follow/index.html" "previews/$GITHUB_RUN_ID-follow.html"
+            echo "The page is on the site at /files/previews/$GITHUB_RUN_ID-follow.html"
+          fi
+      - name: Push what changed
+        id: push
+        if: ${{ !inputs.dry_run }}
+        run: python3 scripts/store.py push "$WORK" --only follow
+      - name: Store the log
+        if: always()
+        run: python3 scripts/store.py put "$PAPER_LOG" "logs/$GITHUB_RUN_ID-follow.log"
+
+  publish:
+    needs: follow
+    if: needs.follow.outputs.recorded == 'success'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/paper-publish.yml
+    secrets: inherit
+
+  email:
+    needs: [follow, publish]
+    if: inputs.email && needs.follow.outputs.recorded == 'success'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/paper-follow-email.yml
+    secrets: inherit

@@ -22,8 +22,9 @@
 // without one, from the static assets deployed with the Worker.
 
 import { decodeJwt, checkClaims, validatePeople, replacePeople, realm, verifyAction, signAction, UNDO, timingSafeEqual, bearerRole } from "./lib.js";
-import { handleStore, serveSite, saveActivePeople, actionUsed } from "./store.js";
+import { handleStore, serveSite, saveActivePeople, actionUsed, serveOwnerFile } from "./store.js";
 import { handleSesEvents } from "./sns.js";
+import { handleJobs, scheduled, dispatch, createRequest } from "./jobs.js";
 
 const SECURITY_HEADERS = {
   "X-Robots-Tag": "noindex, nofollow",
@@ -217,6 +218,8 @@ async function actionsApi(env, path, init = {}) {
 /** Why this action cannot run yet, as page text, or null when it is set up. */
 async function notReady(env, action) {
   if (!env.ACTIONS_TOKEN || !env.GITHUB_REPO) return "One-click actions aren't set up yet: the Worker has no ACTIONS_TOKEN to start the workflow. The setup steps are in SETUP.md under one-click actions.";
+  // With D1 storage the dispatch token only has Actions access; the job itself reports a missing follow token.
+  if (env.DB) return null;
   if (action === "follow" || action === "unfollow") {
     const r = await actionsApi(env, "actions/secrets/FOLLOW_GITHUB_TOKEN");
     if (r.status === 404) return "Follow isn't set up yet: the FOLLOW_GITHUB_TOKEN secret is missing, so nothing was followed. The setup steps are in SETUP.md under one-click actions; this link keeps working until it expires.";
@@ -265,21 +268,26 @@ async function handleAct(request, env, url) {
   if (!origin || origin === "null" || new URL(origin).host !== url.host) {
     return actPage(env, 403, "Not allowed", "<h1>Not allowed</h1><p>Use the button on this site's own page.</p>");
   }
-  const r = await actionsApi(env, "actions/workflows/act.yml/dispatches", {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ref: "main", inputs: { token: m[1] } }),
-  });
-  if (!r.ok) {
-    console.error(`act dispatch failed: ${r.status}`);
-    return actPage(env, 502, "Failed", `<h1>That didn't work</h1><p>GitHub refused to start the workflow (${r.status}). Nothing was done.</p>`);
+  // With D1 storage the run gets an opaque request id: workflow inputs are public on a public repository.
+  const workflow = env.DB ? "paper-act.yml" : "act.yml";
+  const status = env.DB
+    ? await dispatch(env, workflow, { request: await createRequest(env, "act", m[1]) })
+    : (await actionsApi(env, "actions/workflows/act.yml/dispatches", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ref: "main", inputs: { token: m[1] } }),
+    })).status;
+  if (status < 200 || status >= 300) {
+    console.error(`act dispatch failed: ${status}`);
+    return actPage(env, 502, "Failed", `<h1>That didn't work</h1><p>GitHub refused to start the workflow (${status}). Nothing was done.</p>`);
   }
   console.log(`act: ${p.a} ${p.l}`);
   const undo = UNDO[p.a] ? `<a class="btn ghost" href="/act/${await signAction(env.ACTION_SIGNING_KEY, UNDO[p.a], p.l)}">Undo</a>` : "";
   return actPage(env, 200, w.done(p.l), `<h1>${escHtml(w.done(p.l))}</h1><p>${escHtml(w.note)}</p>
 <div class="row">${undo}<a class="btn ghost" href="https://github.com/${login}">GitHub profile</a></div>
-<p style="margin-top:18px;font-size:14px">Every action is logged in the paper. <a href="https://github.com/${escHtml(env.GITHUB_REPO)}/actions/workflows/act.yml">See the runs</a></p>`);
+<p style="margin-top:18px;font-size:14px">Every action is logged in the paper. <a href="https://github.com/${escHtml(env.GITHUB_REPO)}/actions/workflows/${workflow}">See the runs</a></p>`);
 }
 
 export default {
+  scheduled,
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
     if (path === "/act" || path.startsWith("/act/")) return handleAct(request, env, new URL(request.url));
@@ -289,6 +297,8 @@ export default {
     if (machine) {
       // A bearer token is only ever for the storage API; a wrong one is refused outright.
       if (machine === "invalid") return json(401, { error: "That token is not valid." });
+      const jobs = await handleJobs(request, env, url, machine);
+      if (jobs) return withHeaders(jobs);
       return withHeaders((await handleStore(request, env, url, machine)) || new Response(JSON.stringify({ error: "Not found." }), { status: 404, headers: { "Content-Type": "application/json" } }));
     }
     const auth = await authorize(request, env);
@@ -301,6 +311,7 @@ export default {
       const stored = await handleStore(request, env, url, "owner");
       return stored ? withHeaders(stored) : json(404, { error: "Not found." });
     }
+    if (url.pathname.startsWith("/files/") && env.STORE) return withHeaders(await serveOwnerFile(request, env, url));
     if (env.STORE) return withHeaders(await serveSite(request, env));
     return withHeaders(await env.ASSETS.fetch(request));
   },

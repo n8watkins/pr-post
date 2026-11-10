@@ -1,0 +1,63 @@
+# The owner's paper: one-click actions from the Who to follow email
+# (docs/who-to-follow.md). When the owner presses Follow on GitHub, Add to PR
+# Post or Undo on the Worker's /act/ page, the Worker stores the signed link and
+# starts this run with only an opaque request id, because inputs of a public
+# repository's runs are public. The run fetches the link with JOBS_TOKEN and
+# act.py checks it again (signature, expiry, single use, at most
+# [follow] max_follows_per_week follows in 7 days), acts, and logs the result
+# in the paper (D1). Add drafts the person for the People page; nothing joins
+# the watch list until the owner approves it there.
+name: "Paper: one-click action"
+
+on:
+  workflow_dispatch:
+    inputs:
+      request:
+        description: "Request id from the Worker"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paper-act
+  cancel-in-progress: false
+
+env:
+  PR_POST_API: ${{ vars.PR_POST_API }}
+  PR_POST_TOKEN: ${{ secrets.JOBS_TOKEN }}
+
+jobs:
+  act:
+    if: github.repository == 'n8watkins/pr-post'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/paper
+      - name: Pull the paper and the request
+        env:
+          REQUEST: ${{ inputs.request }}
+        run: |
+          python3 scripts/store.py pull "$WORK"
+          python3 scripts/store.py request "$REQUEST" "$RUNNER_TEMP/link"
+      - name: Check, act and log
+        id: act
+        env:
+          ACTION_SIGNING_KEY: ${{ secrets.ACTION_SIGNING_KEY }}
+          FOLLOW_GITHUB_TOKEN: ${{ secrets.FOLLOW_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: paper/bin/quiet python3 scripts/act.py --paper "$WORK" run "$RUNNER_TEMP/link"
+        continue-on-error: true
+      - name: Save the log entry (and a draft for Add)
+        run: python3 scripts/store.py push "$WORK" --no-files
+      - name: Store the log
+        if: always()
+        run: python3 scripts/store.py put "$PAPER_LOG" "logs/$GITHUB_RUN_ID-act.log"
+      - name: Result
+        if: steps.act.outcome != 'success'
+        run: |
+          echo "::error::Not done: the action was refused or failed. The reason is in the paper's action log and logs/$GITHUB_RUN_ID-act.log."
+          exit 1

@@ -3,6 +3,7 @@
 
 Usage:
     python3 scripts/send_email.py [--paper DIR] <paper>/reports/<id>/<date>-<kind>.md [more.md ...]
+    python3 scripts/send_email.py --paper DIR --unsent [--dry-run]     # every new issue not in emailed.json
     python3 scripts/send_email.py [--paper DIR] <report.md> ... --preview out.html   # render only
     python3 scripts/send_email.py [--paper DIR] <report.md> ... --dry-run            # every check, no send
 
@@ -26,6 +27,9 @@ send. --dry-run runs every check a real send would, but never sends.
 """
 
 import argparse
+import datetime as dt
+import json
+import re
 import sys
 from pathlib import Path
 
@@ -113,24 +117,38 @@ def render(items, kind, stem, edition, edition_url, links, brand="PR Post"):
     return page, "\n".join(text) + "\n", subject
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--paper", help="folder holding watchlist.toml (default: $PR_POST_PAPER or the repo root)")
-    ap.add_argument("reports", nargs="+", help="the reports of one issue (same date and kind); one email for all")
-    ap.add_argument("--subject", help="default: built from the report titles")
-    ap.add_argument("--preview", metavar="FILE", help="write the HTML here instead of sending")
-    ap.add_argument("--dry-run", action="store_true", help="run every check a real send would, print the subject, but never send")
-    args = ap.parse_args()
+REPORT_RE = re.compile(r"^reports/[a-z0-9-]+/(\d{4}-\d{2}-\d{2})-(weekly|update)\.md$")
+UNSENT_MAX_AGE_DAYS = 14
 
-    paper = config.paper_dir(args.paper)
+
+def unsent_issues(paper, today=None):
+    """Issues (stem -> report paths) with reports not yet in <paper>/emailed.json, oldest first.
+
+    Reports older than two weeks are left alone, so a new emailed.json never
+    floods the inbox with old issues.
+    """
+    paper = Path(paper)
     try:
-        watch = config.load(paper)
-    except config.ConfigError as e:
-        sys.exit(f"Config error: {e}")
+        sent = set(json.loads((paper / "emailed.json").read_text()))
+    except (OSError, ValueError):
+        sys.exit("No emailed.json in the paper: --unsent needs the list of reports already emailed (store.py pull writes it).")
+    today = today or dt.date.today()
+    issues = {}
+    for f in sorted((paper / "reports").glob("*/*.md")):
+        rel = f.relative_to(paper).as_posix()
+        m = REPORT_RE.match(rel)
+        if not m or rel in sent or (today - dt.date.fromisoformat(m.group(1))).days > UNSENT_MAX_AGE_DAYS:
+            continue
+        issues.setdefault(f.stem, []).append(f)
+    return dict(sorted(issues.items()))
+
+
+def send_issue(paper, watch, reports, subject=None, preview=None, dry_run=False):
+    """Render and send one issue. Returns True when an email went out."""
     by_id = {p["id"]: p for p in watch["people"]}
     order = [p["id"] for p in watch["people"]]
     paths = sorted(
-        (Path(r) for r in args.reports),
+        (Path(r) for r in reports),
         key=lambda p: order.index(p.parent.name.lower()) if p.parent.name.lower() in order else len(order),
     )
     stems = {p.stem for p in paths}
@@ -153,23 +171,59 @@ def main():
 
     links = [("Read the paper", site or None), ("Reports on GitHub", repo)] + [
         (label.replace("_", " ").title(), url) for label, url in watch["links"].items() if label != "repo" and isinstance(url, str)]
-    page, text, subject = render(items, kind, stem, digest.load_edition(paper, stem), edition_url, links, watch["site"]["title"])
-    subject = args.subject or subject
+    page, text, auto_subject = render(items, kind, stem, digest.load_edition(paper, stem), edition_url, links, watch["site"]["title"])
+    subject = subject or auto_subject
 
-    if args.preview:
-        Path(args.preview).write_text(page)
-        print("Wrote", args.preview)
-        if not args.dry_run:
-            return
-
-    if stop := E.check_delivery(watch, args.dry_run, paper):
+    if preview:
+        Path(preview).write_text(page)
+        print("Wrote", preview)
+        if not dry_run:
+            return False
+    if stop := E.check_delivery(watch, dry_run, paper):
         print(stop)
-        return
-    if args.dry_run:
+        return False
+    if dry_run:
         # Never print the recipient, the subject or any key: dry runs show up in Actions logs.
         print(f"Dry run: would send {len(items)} report(s) as one email through {E.describe(watch)}. Nothing was sent.")
-        return
+        return False
     print("Sent:", E.deliver(watch, subject, page, text))
+    return True
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--paper", help="folder holding watchlist.toml (default: $PR_POST_PAPER or the repo root)")
+    ap.add_argument("reports", nargs="*", help="the reports of one issue (same date and kind); one email for all")
+    ap.add_argument("--unsent", action="store_true",
+                    help="send every recent issue whose reports are not in <paper>/emailed.json, one email each, and record them there")
+    ap.add_argument("--subject", help="default: built from the report titles")
+    ap.add_argument("--preview", metavar="FILE", help="write the HTML here instead of sending (with --unsent, the newest issue)")
+    ap.add_argument("--dry-run", action="store_true", help="run every check a real send would, but never send")
+    args = ap.parse_args()
+    if bool(args.reports) == args.unsent:
+        ap.error("give the reports of one issue, or --unsent")
+
+    paper = config.paper_dir(args.paper)
+    try:
+        watch = config.load(paper)
+    except config.ConfigError as e:
+        sys.exit(f"Config error: {e}")
+    if not args.unsent:
+        send_issue(paper, watch, args.reports, args.subject, args.preview, args.dry_run)
+        return
+
+    issues = unsent_issues(paper)
+    if not issues:
+        print("No new reports to email.")
+        return
+    print(f"{len(issues)} issue(s) with new reports.")
+    emailed = paper / "emailed.json"
+    for i, (stem, paths) in enumerate(issues.items()):
+        last = i == len(issues) - 1
+        if send_issue(paper, watch, paths, None, args.preview if last else None, args.dry_run):
+            # Recorded after each send, so a failure later never resends this one.
+            done = json.loads(emailed.read_text()) + [p.relative_to(paper).as_posix() for p in paths]
+            emailed.write_text(json.dumps(sorted(set(done)), indent=1) + "\n")
 
 
 if __name__ == "__main__":

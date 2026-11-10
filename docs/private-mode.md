@@ -83,6 +83,18 @@ python3 scripts/store.py site dist                 # publishes the site, then re
 `store.py` prints counts only, never file names, so it is safe in the public logs of a public repository's Actions; `--verbose` lists paths for local use.
 Keep every other step quiet too: Actions logs, artifacts and workflow inputs of a public repository are readable by anyone.
 
+### Jobs on a public repository
+
+The owner's paper runs its jobs on this public repository's Actions (`.github/workflows/paper-*.yml`), which are free, and keeps them quiet because public logs, artifacts and workflow inputs are readable by anyone:
+
+- Engine output goes through `paper/bin/quiet` into a log file that is stored in the paper (`logs/`), readable on the site at `/files/logs/...`; the public log shows only which script ran.
+- `store.py pull` masks every watched person and the email address for the rest of the job.
+- No artifacts: email previews go to the paper's `previews/`.
+- The Worker starts jobs with an opaque request id (`worker/jobs.js`); the job fetches the payload, such as a one-click link, with `JOBS_TOKEN`.
+
+The Worker is also the clock: its cron triggers start collect and publish on time, which GitHub's own schedules do not guarantee, and dispatched runs keep going when the repository sees no commits for 60 days.
+One-click Add from the Who to follow email (`act.py run`) drafts the person, and `store.py push` sends new `[[people]]` blocks as drafts that wait for the owner on the site; nothing joins the watch list without that.
+
 ## A paper in its own private repository
 
 If you would rather keep your paper in git, put it in a private repository of its own and run this engine from it, pinned to a release, so there is one copy of the code and upgrades are a one-line change.

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Run one engine command with its output going to the run's log file
+# ($PAPER_LOG), never to the public Actions log. Prints only which script ran
+# and whether it worked; the full log is stored in the paper (logs/) at the end
+# of the job. Usage: paper/bin/quiet python3 scripts/collect.py --paper "$WORK"
+set -uo pipefail
+log="${PAPER_LOG:?set PAPER_LOG}"
+name="$(basename "${2:-$1}")"
+{ echo "== $(date -u +%FT%TZ) $name"; } >> "$log"
+"$@" >> "$log" 2>&1
+code=$?
+if [ "$code" -eq 0 ]; then
+  echo "ok: $name"
+else
+  echo "::error::$name failed (exit $code); the full log is stored in the paper's logs/ at the end of this job."
+fi
+exit "$code"

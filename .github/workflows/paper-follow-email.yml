@@ -1,0 +1,64 @@
+# The owner's paper: the Who to follow email, this week's top picks with
+# one-click Follow and Add to PR Post buttons (send_follow.py), through Amazon
+# SES. Sent after the Saturday Who to follow run, only when [follow] email =
+# true. By hand: "Dry run" renders it into the paper's previews/ and sends
+# nothing; "Test send" sends one even while [follow] email is off.
+name: "Paper: who to follow email"
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: render it into previews/, send nothing"
+        type: boolean
+        default: false
+      test_send:
+        description: "Test send: send once even though [follow] email is off"
+        type: boolean
+        default: false
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  PR_POST_API: ${{ vars.PR_POST_API }}
+  PR_POST_TOKEN: ${{ secrets.JOBS_TOKEN }}
+
+jobs:
+  email:
+    if: github.repository == 'n8watkins/pr-post'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: email
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/paper
+      - name: Pull the paper
+        run: python3 scripts/store.py pull "$WORK"
+      - name: AWS credentials for SES (one hour, send-only)
+        if: vars.AWS_SES_ROLE_ARN != '' && !inputs.dry_run
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_SES_ROLE_ARN }}
+          aws-region: us-east-1
+          role-duration-seconds: 900
+      - name: Send the picks
+        env:
+          ACTION_SIGNING_KEY: ${{ secrets.ACTION_SIGNING_KEY }}
+          DRY_RUN: ${{ inputs.dry_run && 'true' || '' }}
+          FORCE: ${{ inputs.test_send && 'true' || '' }}
+        run: |
+          paper/bin/quiet python3 scripts/send_follow.py --paper "$WORK" ${DRY_RUN:+--dry-run --preview "$RUNNER_TEMP/follow-email.html"} ${FORCE:+--force}
+          if [ -n "$DRY_RUN" ] && [ -f "$RUNNER_TEMP/follow-email.html" ]; then
+            python3 scripts/store.py put "$RUNNER_TEMP/follow-email.html" "previews/$GITHUB_RUN_ID-follow-email.html"
+            echo "The rendered email is on the site at /files/previews/$GITHUB_RUN_ID-follow-email.html"
+          fi
+      - name: Store the log
+        if: always()
+        run: python3 scripts/store.py put "$PAPER_LOG" "logs/$GITHUB_RUN_ID-follow-email.log"

@@ -1,0 +1,47 @@
+# The owner's paper: deploy the Worker (worker/, paper/wrangler.jsonc) and
+# apply new D1 migrations when they change on main. Content never needs a
+# deploy: the Worker serves the site from R2. Skips with a notice until the
+# CLOUDFLARE_API_TOKEN secret exists (paper/SETUP.md); the staging Worker is
+# always deployed, the live one only when the repository variable
+# PAPER_DEPLOY_LIVE is "true".
+name: "Paper: deploy"
+
+on:
+  push:
+    branches: [main]
+    paths: ["worker/**", "paper/wrangler.jsonc", "paper/migrations/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paper-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.repository == 'n8watkins/pr-post'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Waiting for setup
+        if: env.CLOUDFLARE_API_TOKEN == ''
+        run: echo "::notice::Skipping the deploy until the CLOUDFLARE_API_TOKEN secret is added (paper/SETUP.md)."
+      - name: Migrate D1
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: npx --yes wrangler@4.151.3 d1 migrations apply pr-post -c paper/wrangler.jsonc --remote
+      - name: Deploy staging
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        run: npx --yes wrangler@4.151.3 deploy -c paper/wrangler.jsonc --env staging
+      - name: Deploy the live paper
+        if: env.CLOUDFLARE_API_TOKEN != '' && vars.PAPER_DEPLOY_LIVE == 'true'
+        run: npx --yes wrangler@4.151.3 deploy -c paper/wrangler.jsonc
