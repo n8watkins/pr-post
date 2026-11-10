@@ -225,7 +225,8 @@ def pull(api, work, say=print):
     _, prof = api.json("GET", "/api/paper/profiles")
     (work / "profiles").mkdir(exist_ok=True)
     for pid, text in prof["profiles"].items():
-        (work / "profiles" / f"{pid}.md").write_text(text)
+        # Exact UTF-8 bytes both ways: read_text() would turn \r\n into \n and make an unchanged profile look edited.
+        (work / "profiles" / f"{pid}.md").write_bytes(text.encode())
         snap["profiles"][pid] = sha256(text.encode())
 
     _, man = api.json("GET", "/api/paper/manifest")
@@ -308,10 +309,10 @@ def push_profiles(api, work, snap):
     if not folder.is_dir():
         return 0
     for f in sorted(folder.glob("*.md")):
-        text = f.read_text()
-        if snap.get("profiles", {}).get(f.stem) == sha256(text.encode()):
+        data = f.read_bytes()
+        if snap.get("profiles", {}).get(f.stem) == sha256(data):
             continue
-        api.call("PUT", "/api/paper/profiles/" + quote(f.stem), text.encode(), {"Content-Type": "text/markdown; charset=utf-8"})
+        api.call("PUT", "/api/paper/profiles/" + quote(f.stem), data, {"Content-Type": "text/markdown; charset=utf-8"})
         sent += 1
     return sent
 
@@ -385,7 +386,7 @@ def push_drafts(api, work, snap):
             prof = work / "profiles" / f"{pid}.md"
             note = "Drafted by a job; work through the profile's \"Still to check\" list before approving."
             status, _ = api.json("POST", "/api/paper/people/drafts",
-                                 {"entry": entry, "profile": prof.read_text() if prof.is_file() else "", "note": note}, ok=(200, 409))
+                                 {"entry": entry, "profile": prof.read_bytes().decode() if prof.is_file() else "", "note": note}, ok=(200, 409))
             added += status == 200
             known.add(pid)
             snap.setdefault("profiles", {})[pid] = sha256(prof.read_bytes()) if prof.is_file() else ""
