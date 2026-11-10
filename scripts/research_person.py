@@ -429,7 +429,8 @@ def render(r):
             "", f"_Draft generated {r['researched']} by research_person.py. Review before committing._", ""]
     out += ["<!-- watchlist.toml draft. Links on their GitHub profile are added automatically, so only others are listed.", "",
             *watchlist_block(r), "-->", ""]
-    return "\n".join(out)
+    # Bios and READMEs from GitHub can carry \r\n; profiles are plain \n Markdown.
+    return "\n".join(out).replace("\r\n", "\n").replace("\r", "\n")
 
 
 def watchlist_block(r, known_for="TODO"):

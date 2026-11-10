@@ -158,6 +158,20 @@ class StoreParts(unittest.TestCase):
         self.assertIn("jane", snap["people"])
         self.assertIn("jane", snap["profiles"])  # so push_profiles does not send it again
 
+    def test_a_drafted_profile_with_windows_line_endings_is_sent_once(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        work = Path(tmp.name)
+        (work / "watchlist.toml").write_text(store.render_watchlist({}, [{"github": "Jane", "name": "Jane"}]))
+        (work / "profiles").mkdir()
+        (work / "profiles" / "jane.md").write_bytes(b"# Jane\r\nBio line\r\n")
+        api = mock.Mock()
+        api.json.return_value = (200, {})
+        snap = {"people": [], "profiles": {}}
+        store.push_drafts(api, work, snap)
+        self.assertEqual(api.json.call_args.args[2]["profile"], "# Jane\r\nBio line\r\n")
+        self.assertEqual(store.push_profiles(api, work, snap), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
