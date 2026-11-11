@@ -56,6 +56,7 @@ def usage_summary(prep, mode, model, prompts, calls, failed, wall):
         "latency_s": round(sum(c["latency_s"] for c in calls), 3), "wall_s": round(wall, 3),
         "checks_failing": [c["id"] or c["stage"] for c in calls if c["problems_final"]],
         "fallback": [c["id"] for c in calls if c.get("fallback")] + [i for c in calls for i in c.get("fallback_ids", [])],
+        "repaired": [c["id"] for c in calls if c.get("repaired")] + [i for c in calls for i in c.get("repaired_ids", [])],
         "failed": failed,
         "calls": calls,
     }
@@ -126,6 +127,8 @@ def run(args, say=print):
         f"{1 if edition else 0} edition under gemini/{'single/' if args.single else ''}.")
     if usage["checks_failing"]:
         say(f"Warning: {len(usage['checks_failing'])} answers still fail a check after their retry (see the usage file).")
+    if usage["repaired"]:
+        say(f"Note: {len(usage['repaired'])} reports had wrong bullets removed by code (see the usage file).")
     if usage["fallback"]:
         say(f"Note: {len(usage['fallback'])} reports were built from the brief by code because the answer was missing or wrong (see the usage file).")
     if failed:

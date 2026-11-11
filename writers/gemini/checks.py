@@ -120,10 +120,13 @@ def second_person(text, source=""):
     plain = MD_LINK.sub(r"\1", strip_urls(text or ""))
     src = " ".join(re.findall(r"[\w']+", (source or "").lower()))
     for m in YOU_RE.finditer(plain):
-        before = re.findall(r"[\w']+", plain[:m.start()])[-2:]
-        after = re.findall(r"[\w']+", plain[m.end():])[:2]
-        snippet = " ".join(w.lower() for w in [*before, m.group(0), *after])
-        if not src or len(before) + len(after) < 3 or f" {snippet} " not in f" {src} ":
+        line_start = plain.rfind("\n", 0, m.start()) + 1
+        line_end = plain.find("\n", m.end())
+        before = re.findall(r"[\w']+", plain[line_start:m.start()])[-3:]
+        after = re.findall(r"[\w']+", plain[m.end():line_end if line_end >= 0 else None])[:3]
+        windows = [" ".join(w.lower() for w in [*before[len(before) - k:], m.group(0), *after[:j]])
+                   for k in range(len(before) + 1) for j in range(len(after) + 1) if k + j >= 3]
+        if not src or not any(f" {w} " in f" {src} " for w in windows):
             return True
     return False
 

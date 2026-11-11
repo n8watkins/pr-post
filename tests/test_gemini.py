@@ -224,6 +224,7 @@ class ChecksTest(unittest.TestCase):
     def test_a_quoted_description_is_not_the_writer_saying_you(self):
         brief = "- 2026-11-10 o/bank: A tiny currency for your Slack <https://github.com/o/bank>"
         self.assertFalse(checks.second_person("Dax started bank, a tiny currency for your Slack.", brief))
+        self.assertFalse(checks.second_person('- New repo bank: "A tiny currency for your Slack"\n- New repo bane.', brief))
         self.assertTrue(checks.second_person("Dax started bank for your team.", brief))
         self.assertTrue(checks.second_person("You shipped it."))
 
@@ -488,6 +489,19 @@ class FallbackRunTest(FixtureCase):
         self.assertTrue(ada.get("fallback"))
         self.assertFalse(checks.second_person(ada["report_md"]))
         self.assertTrue(next(c for c in runner.calls if c["id"] == "ada-fixture")["fallback"])
+
+    def test_one_wrong_bullet_is_dropped_and_the_rest_kept(self):
+        def responder(system, prompt, schema, n):
+            answer = fake.respond(system, prompt, schema)
+            if "report_md" in schema["properties"] and "Ada Fixture (id: ada-fixture)" in prompt:
+                answer["report_md"] += "- Ada Fixture merged 4817 PRs in one sitting, a record for the project.\n"
+            return 200, MockGemini.wrap(answer)
+        mock, runner, prep, answers, front, lead_id, failed = self.run_split(responder)
+        ada = answers["ada-fixture"]
+        self.assertFalse(ada.get("fallback"))
+        self.assertNotIn("4817", ada["report_md"])
+        self.assertEqual(sum(1 for line in ada["report_md"].splitlines() if line.startswith("- ")), 2)
+        self.assertTrue(next(c for c in runner.calls if c["id"] == "ada-fixture")["repaired"])
 
     def test_single_mode_fills_a_missing_person_from_the_brief(self):
         mock = MockGemini()

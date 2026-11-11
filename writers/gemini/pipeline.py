@@ -486,7 +486,7 @@ def fallback_line(h):
     if h["kind"] == "release":
         return f"Released [{link_label(name + ' ' + h['title'] if name.lower() not in h['title'].lower() else h['title'])}]({h['url']})."
     if h["kind"] == "video":
-        return f"Posted a new video: [{link_label(h['title'])}]({h['url']})."
+        return f"Posted a new video, \"{clip_text(h['title'])}\" ([video]({h['url']}))."
     verb = {"pr": "Merged", "open_pr": "Opened", "commit": "Committed"}.get(h["kind"], "Worked on")
     number = re.search(r"/pull/(\d+)", h["url"])
     label = f"PR {number.group(1)}" if number else "commit"
@@ -644,19 +644,43 @@ def assemble(prep, answers, front, lead_id, model, prompts, mode):
 
 # ---------- the two modes ----------
 
-def settle(person, kind, answer, problems):
-    """The answer to keep for one person: the model's, or the code-built fallback when the model's is missing or wrong.
+def wrong_bullet(line, person, input_text):
+    """Whether one bullet carries a hard problem: a number or link the input lacks, a link outside the brief, or the wrong "you"."""
+    if checks.untraceable_numbers(line, input_text) or checks.unknown_urls(line, input_text):
+        return True
+    allowed = {u.rstrip(".,;:") for u in brief_urls(person)}
+    if any(u.rstrip(".,;:") not in allowed for u in checks.URL_RE.findall(line)):
+        return True
+    return not person["self"] and checks.second_person(line, person.get("brief", ""))
 
-    Returns (answer or None, used_fallback).
+
+def repair(answer, person, kind, input_text):
+    """The model's answer without the bullets that are wrong, when what is left is still a sound report; else None."""
+    lines = answer.get("report_md", "").splitlines()
+    kept = [line for line in lines if not (line.startswith("- ") and wrong_bullet(line, person, input_text))]
+    if len(kept) == len(lines) or sum(1 for line in kept if line.startswith("- ")) < 2:
+        return None
+    fixed = {**answer, "report_md": "\n".join(kept) + "\n"}
+    return fixed if not hard_problems(check_person(fixed, person, kind, input_text)) else None
+
+
+def settle(person, kind, answer, problems, input_text=""):
+    """The answer to keep for one person: the model's; the model's without its wrong bullets; or, when neither is sound,
+    a report built by code from the brief.
+
+    Returns (answer or None, how: None, "repaired" or "fallback").
     """
     if answer is not None and not hard_problems(problems):
-        return answer, False
+        return answer, None
+    fixed = repair(answer, person, kind, input_text) if answer is not None and input_text else None
+    if fixed is not None:
+        return fixed, "repaired"
     fb = fallback_answer(person, kind)
     if fb is None:
-        return answer, False
+        return answer, None
     if answer is not None and answer.get("profile_md") and not hard_problems(checks.check_text("profile_md", answer["profile_md"], person["brief"])):
         fb["profile_md"] = answer["profile_md"]
-    return fb, True
+    return fb, "fallback"
 
 
 def run_split(runner, prep, previous):
@@ -667,9 +691,9 @@ def run_split(runner, prep, previous):
             continue
         req = person_request(prompts, prep, p)
         answer, problems = runner.run(req, lambda a, p=p, req=req: check_person(normalize_answer(a, prep["kind"]), p, prep["kind"], req["prompt"]))
-        answer, used = settle(p, prep["kind"], answer, problems)
-        if used:
-            runner.calls[-1]["fallback"] = True
+        answer, how = settle(p, prep["kind"], answer, problems, req["prompt"])
+        if how:
+            runner.calls[-1][how] = True
         if answer is None:
             failed.append(p["id"])
             continue
@@ -695,19 +719,19 @@ def run_single(runner, prep, previous):
     for a in (answer or {}).get("people") or []:
         if isinstance(a, dict) and a.get("id") in by_id and a["id"] not in got:
             got[a["id"]] = dict(a)
-    answers, fallbacks = {}, []
+    answers, fixed = {}, {"fallback": [], "repaired": []}
     for pid, person in by_id.items():
         a = got.get(pid)
         problems = check_person(normalize_answer(a, prep["kind"]), person, prep["kind"], req["prompt"]) if a is not None else ["missing"]
-        a, used = settle(person, prep["kind"], a, problems if a is not None else ["not in the input"])
-        if used:
-            fallbacks.append(pid)
+        a, how = settle(person, prep["kind"], a, problems if a is not None else ["not in the input"], req["prompt"])
+        if how:
+            fixed[how].append(pid)
         if a is None:
             continue
         a["report_full"] = report_full(person, prep["kind"], a["report_md"])
         answers[pid] = a
     if runner.calls:
-        runner.calls[-1]["fallback_ids"] = fallbacks
+        runner.calls[-1]["fallback_ids"], runner.calls[-1]["repaired_ids"] = fixed["fallback"], fixed["repaired"]
     failed = [pid for pid in by_id if pid not in answers]
     if answer is None:
         return answers, None, (choose_lead(prep, answers) if answers else None), failed + ["single"]
