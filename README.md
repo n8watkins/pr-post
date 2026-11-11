@@ -19,7 +19,7 @@ pr-post turns the public GitHub and YouTube activity of the people you choose in
 - **Prints a newspaper** from those facts alone: a front page with a lead story, box scores and a commit ticker, and a page per person with their week, recent work, videos and the repositories where the time went.
   No AI is needed.
 - **Publishes `feed.json`**, a documented and versioned feed of who you follow and what they shipped, for your own site.
-- **Leaves room for writers.** A Claude Code routine, or later a Gemini key in Actions, can add written reports and summaries on top; anything an AI writes is labelled.
+- **Leaves room for writers.** A Claude Code routine or the Gemini writer can add written reports and summaries on top; anything an AI writes is labelled.
 
 It is plain Python 3.11+ standard library and a little vanilla JavaScript.
 There is nothing to install.
@@ -115,7 +115,7 @@ The facts are always there; writing is an optional layer on top.
 
 - **(a) A Claude Code routine** reads the collected data and writes reports, profiles, front pages and summaries, following [INSTRUCTIONS.md](INSTRUCTIONS.md).
   This is how the original private paper runs.
-- **(b) A Gemini API key in Actions** is the planned hosted option for summaries; it is not built yet.
+- **(b) The Gemini writer** (`writers/gemini/`) writes the same reports and edition with the Gemini API, for now beside the Claude routine under `gemini/` so the two can be compared blind with `tools/compare/`.
 - **(c) None.** Facts and stats only, which is how the demo runs.
 
 Anything an AI writes is labelled on the site ("AI summary · claude") and in the feed (`summary_source`, `summary_is_ai`).
@@ -146,6 +146,8 @@ See **[docs/writers.md](docs/writers.md)**.
 | `scripts/brief.py` | A few-kilobyte brief per person for an AI writer, so it reads far fewer tokens than `data/` |
 | `scripts/act.py`, `scripts/act_lib.py` | One-click Follow and Add links from that email: signed, single use, logged |
 | `scripts/digest.py`, `scripts/email_lib.py` | Shared by the emails and the site's issue pages |
+| `writers/gemini/` | The Gemini writer: trims each brief to its window, one request per active person and one for the edition, checks in code, saves under `gemini/` |
+| `tools/compare/` | Blind A/B packets comparing two writers, the reviewer's prompt, and the unblinding step that saves `reviews/<date>.md` |
 | `scripts/research_person.py` | Drafts a watch list entry and profile for someone new, for review |
 | `scripts/follow.py`, `scripts/follow_lib.py` | Optional "Who to follow": candidates, mini reports, fit scores and weekly picks |
 | `site/assets/` | The newspaper's CSS and JavaScript |

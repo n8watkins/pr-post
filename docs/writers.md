@@ -11,7 +11,7 @@ pr-post works in two layers.
    Anything an AI writes is labelled with its source on the site and in `feed.json`.
 
 Set `[writer] kind` in `watchlist.toml` to record which writer a paper uses.
-It is documentation for people reading your config; nothing in this repository calls an AI.
+It is documentation for people reading your config: collecting and building never call an AI, and the Gemini writer below runs only when you start it.
 
 ## What a writer produces
 
@@ -96,11 +96,80 @@ This is how the original private paper runs.
 Report commits start with `report:`.
 If you want a guard against a prompt-injected writer touching other files, fail CI when a `report:` commit changes anything outside `reports/`, `profiles/`, `editions/` and `summaries/`.
 
-## (b) A Gemini API key in Actions (later)
+## (b) The Gemini writer
 
-The plan is an optional step in the Pages workflow that runs only when a `GEMINI_API_KEY` secret exists, writes `summaries/<date>.json` with `source` set to the model name, and leaves the facts untouched.
-It is not built yet: the demo is facts-only while models are compared.
-Anything that writes the summaries file in the format above works with the site and feed today.
+`writers/gemini/` is a second, fully independent writer: plain Python (standard library only) that calls the Gemini API's `generateContent` with a JSON response schema.
+For now it runs beside the Claude routine on the same input, so the two can be compared; it never overwrites Claude's files and nothing it writes is published or emailed.
+No Claude is involved anywhere in it.
+
+```sh
+python3 -m writers.gemini run --paper work/ --dry-run           # every request built, counted and estimated; nothing sent
+python3 -m writers.gemini run --paper work/ --mock --no-push    # the whole pipeline with a built-in fake model, no key
+pass-env run -- python3 -m writers.gemini run --paper work/     # the real run: GEMINI_API_KEY from pass-env
+python3 -m writers.gemini run --paper work/ --single            # variant B: one request for the whole run
+```
+
+`--kind weekly|update` overrides the day (weekly on Saturdays), `--date` runs it for an older snapshot, `--model` picks the model (default `gemini-3.5-flash-lite`), `--rpm` paces requests for the free tier (default 10 a minute) and `--verbose` lists people and paths for local use.
+Without `--verbose` it prints counts only, like `scripts/store.py`, because Actions logs on a public repository are public.
+
+### How a run works
+
+0. **Prepare, in code.** For each person, the window follows [paper/INSTRUCTIONS.md](../paper/INSTRUCTIONS.md) step 1 (weekly: since the newest weekly report, or 7 days; midweek: since the newest report of either kind, or 4 days), counting only reports dated before the run.
+   The brief is trimmed to that window, and each kept item gets an id such as `i4`.
+   A missing brief, or one collected more than 24 hours before the run, is skipped, as the instructions say.
+   A person with nothing in the window is quiet: they get a one-line report from a template and no request.
+   Active people get their profile attached.
+1. **One request per active person**, answering `{report_md, story {beat, headline, summary}, profile_lines[], lead_score, quote_candidate_ids[]}` (plus `profile_md` when they have no profile yet).
+2. **One edition request** that sees only stage 1's answers, not the briefs: `tldr`, `lead` (headline, deck, body), `weather` and `corrections` (checked against the previous Gemini edition's "probably" guesses).
+3. **Assemble, in code.** The lead is the highest `lead_score`; births and obituaries come from the briefs; the quote of the week is copied by code from `data/<id>.json` by item id, so it is never model-written; quiet people get their template line and a quiet story.
+   A midweek edition keeps the lead and three stories.
+4. **Check, in code.** Word caps (weekly report 250, update 120, front page 400, TL;DR bullets 15, story summaries 30), the JSON shape, every number printed must appear in the request's input, and every link must be an address from the input.
+   On a failure the request is sent once more with the problems listed; whatever still fails is kept and recorded, so the comparison shows it.
+   Em dashes are replaced with hyphens.
+5. **Save** under `gemini/` in the paper, and push that folder with `scripts/store.py push` when the folder was pulled with it (`--no-push` keeps it local).
+   It never runs `store.py publish` and never sends email.
+
+| Path in the paper | What |
+| --- | --- |
+| `gemini/reports/<id>/<date>-<weekly or update>.md` | Each person's report, same format as Claude's |
+| `gemini/editions/<date>-<kind>.json` | The edition, with `source` set to the model name, `prompt_version`, `prompt_sha` and `mode` |
+| `gemini/profiles/<id>.md` | Only when the run would change a profile: the profile with its new dated lines, or a first draft |
+| `gemini/usage/<date>.json` | Requests, retries, input, output and thinking tokens (from `usageMetadata`), latency, checks still failing |
+| `gemini/single/...` | The same for variant B (`--single`), so both variants can run on one snapshot |
+
+The prompts are files in `writers/gemini/prompts/v1/`, built from the writing rules and formats in `paper/INSTRUCTIONS.md` (not its tool or file steps).
+Change them by adding a new version folder and passing `--prompt-version`, so every output records which prompts wrote it.
+
+The paper's storage accepts `gemini/` and `reviews/` from the jobs token, and the owner can read them at `/files/gemini/...` after sign-in.
+The Claude routine's writer token cannot read either, so its runs stay independent of Gemini's.
+
+### Privacy on the free tier
+
+On the Gemini API's free tier, Google may use what you send, and what the model answers, to improve its products, and people may review it.
+A run sends each active person's brief (public GitHub and YouTube activity), their profile from the paper, their name, `known_for` line and the `[writer] reader` line.
+The briefs are public data, but the profiles and the reader line are the paper's own private notes.
+Use a paid tier (a Cloud Billing account on the API key's project), where inputs are not used that way, before sending anything you would not publish.
+
+### Comparing writers blind
+
+`tools/compare/` compares two writers on one run without the reviewer knowing which is which.
+
+```sh
+python3 -m tools.compare packet --paper work/ --date 2026-11-14                 # Claude ("") against gemini; --b gemini/single for variant B
+# a Claude agent reviews work/.compare/2026-11-14/packet.md following tools/compare/REVIEWER.md, writing review.md beside it
+python3 -m tools.compare unblind --paper work/ --date 2026-11-14 --push        # -> reviews/2026-11-14.md in the paper
+```
+
+The packet holds the trimmed briefs, then each writer's reports and edition labelled Writer A and Writer B in a random order, with every field that names a model removed.
+The mapping goes to `.compare/<date>.key.json`, outside the folder the reviewer reads; `.compare/` is never pushed.
+[tools/compare/REVIEWER.md](../tools/compare/REVIEWER.md) is the reviewer's prompt: missed news, untraceable facts, numbers that do not match the brief, word caps, format, tone and readability, person by person, with concrete suggestions for each writer's instructions.
+`unblind` names the writers, adds a cost table from `gemini/usage/<date>.json` (`--price-in` and `--price-out` turn tokens into dollars; `--claude-usage` adds the Claude run's numbers if you have them) and writes `reviews/<date>.md`.
+After unblinding, suggestions for the Gemini writer go to its prompts and suggestions for the Claude routine to `paper/INSTRUCTIONS.md`, as proposals for the owner.
+
+### Later: choosing the writer
+
+The plan is to make `[writer] kind` choose who writes the paper that gets published and emailed: `"claude-routine"`, `"gemini"` (its output written to `reports/` and `editions/` instead of `gemini/`) or `"both"` (today's side-by-side setup).
+That switch, and running the Gemini writer from a scheduled workflow, are not built yet; today `kind` is still documentation and the Gemini writer only ever writes `gemini/`.
 
 ## (c) None
 
