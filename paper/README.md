@@ -24,4 +24,4 @@ Nothing private is ever committed: [docs/private-mode.md](../docs/private-mode.m
 The Worker's cron starts these on time ([worker/jobs.js](../worker/jobs.js)); every job can also be run by hand from the Actions tab.
 Their public logs show only counts: each job stores its full log in the paper, readable on the site at `/files/logs/<run id>-<job>.log` (email previews at `/files/previews/...`).
 
-[SETUP.md](SETUP.md) lists the secrets, variables and owner steps.
+[SETUP.md](SETUP.md) lists this paper's secrets and variables; [docs/cloudflare-setup.md](../docs/cloudflare-setup.md) is the setup guide.

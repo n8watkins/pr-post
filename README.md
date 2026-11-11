@@ -36,6 +36,9 @@ There is nothing to install.
 Your paper appears at `https://<you>.github.io/<repo>/` and its feed at `https://<you>.github.io/<repo>/feed.json`.
 Forks do not run scheduled workflows until you enable Actions on the fork.
 
+A paper on GitHub Pages is public: anyone can read it, its watch list and any written reports.
+For one only you can read, on Cloudflare behind sign-in, follow **[docs/cloudflare-setup.md](docs/cloudflare-setup.md)**.
+
 ### Run it locally
 
 ```sh
@@ -127,7 +130,8 @@ See **[docs/writers.md](docs/writers.md)**.
 - GitHub reports private work only as a per-day count with no names; pr-post drops items from private repositories everywhere and never puts private counts in the feed.
   A public site never prints them either; only a private site that opts in with `show_private_counts` does.
 - Nothing is committed back by the demo workflow: collected data stays in the Actions cache and only the built site is published.
-- For a paper only you and friends can read, see **[docs/private-mode.md](docs/private-mode.md)**.
+- For a paper only you can read, follow **[docs/cloudflare-setup.md](docs/cloudflare-setup.md)**: public or private, then the private setup on Cloudflare from zero.
+  **[docs/private-mode.md](docs/private-mode.md)** explains the design.
   It also shows how to keep everything private out of git, in Cloudflare D1 and R2 behind the same sign-in, or in a private repository of its own.
 
 ## How it is built

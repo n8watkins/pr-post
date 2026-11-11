@@ -1,5 +1,5 @@
 <!-- The owner's paper: what the Claude routine (the writer) follows on each run.
-     Its prompt points here; paper/SETUP.md has the prompt and the routine's setup. -->
+     Its prompt points here; docs/cloudflare-setup.md (section 4) has the prompt and the routine's setup. -->
 
 # Report instructions
 

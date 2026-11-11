@@ -2,6 +2,7 @@
 
 The demo is a public site on GitHub Pages.
 If you would rather keep your paper to yourself and a few friends, serve it from a Cloudflare Worker that requires sign-in on every request.
+[cloudflare-setup.md](cloudflare-setup.md) is the step-by-step setup; this page explains the design.
 Private mode also unlocks two things a public site never does: GitHub's private contribution counts (when you opt in) and a settings page that edits your watch list.
 
 ## Settings
@@ -35,9 +36,7 @@ A private site also tells search engines not to index it.
 
 3. Choose how readers sign in.
    - **Cloudflare Access (recommended).**
-     In the Cloudflare dashboard open the Worker, then **Settings**, **Domains & Routes**, and turn on Cloudflare Access for its address.
-     Allow the email addresses you want.
-     Then redeploy with `--var ACCESS_TEAM_DOMAIN:<team>.cloudflareaccess.com --var ACCESS_AUD:<application audience tag>`.
+     Follow [cloudflare-setup.md, section 3](cloudflare-setup.md#3-cloudflare-access): a bypass for the machine paths first, then Access on the Worker, then `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` as variables.
      The Worker verifies Access's signed token on every request and also checks `ALLOWED_EMAILS`.
    - **A shared password until Access is set up.**
      `npx wrangler secret put SITE_PASSWORD`.
@@ -62,7 +61,7 @@ This is how the owner's paper runs (`paper/` in this repository).
 | `data/`, `stats/`, `briefs/`, `reports/`, `editions/`, `summaries/`, `follow/` mini reports, `notes/`, `logs/`, `previews/`, `backups/`, `gemini/` (the Gemini writer's parallel output), `reviews/` (blind writer comparisons) | R2, under `paper/` | Jobs; the writer reads briefs, data, reports, editions and summaries and writes reports and editions (never `gemini/` or `reviews/`) |
 | The built site | R2, under `SITE_PREFIX` (`site/`) | The publish job; the Worker serves it after sign-in |
 
-Bind a D1 database as `DB` (apply `paper/migrations/`) and an R2 bucket as `STORE`; `paper/wrangler.jsonc` is a complete example, including a staging Worker on the same storage that serves `site-next/`.
+Bind a D1 database as `DB` (apply `paper/migrations/`) and an R2 bucket as `STORE`; `paper/wrangler.jsonc` is a complete example, and [cloudflare-setup.md](cloudflare-setup.md) sets it all up from zero, step by step.
 With `STORE` bound the Worker serves the site from R2 and needs no static assets, so new content never needs a deploy.
 
 Jobs and the writer reach the storage with a bearer token instead of the sign-in: `JOBS_TOKEN` for GitHub Actions and `WRITER_TOKEN` for an AI writer such as a Claude routine.

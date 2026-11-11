@@ -218,12 +218,12 @@ async function actionsApi(env, path, init = {}) {
 
 /** Why this action cannot run yet, as page text, or null when it is set up. */
 async function notReady(env, action) {
-  if (!env.ACTIONS_TOKEN || !env.GITHUB_REPO) return "One-click actions aren't set up yet: the Worker has no ACTIONS_TOKEN to start the workflow. The setup steps are in SETUP.md under one-click actions.";
+  if (!env.ACTIONS_TOKEN || !env.GITHUB_REPO) return "One-click actions aren't set up yet: the Worker has no ACTIONS_TOKEN to start the workflow. The setup steps are in docs/cloudflare-setup.md.";
   // With D1 storage the dispatch token only has Actions access; the job itself reports a missing follow token.
   if (env.DB) return null;
   if (action === "follow" || action === "unfollow") {
     const r = await actionsApi(env, "actions/secrets/FOLLOW_GITHUB_TOKEN");
-    if (r.status === 404) return "Follow isn't set up yet: the FOLLOW_GITHUB_TOKEN secret is missing, so nothing was followed. The setup steps are in SETUP.md under one-click actions; this link keeps working until it expires.";
+    if (r.status === 404) return "Follow isn't set up yet: the FOLLOW_GITHUB_TOKEN secret is missing, so nothing was followed. The setup steps are in docs/cloudflare-setup.md; this link keeps working until it expires.";
     if (!r.ok) return `Could not check the setup with GitHub (${r.status}). Nothing was done; try again in a minute.`;
   }
   return null;
@@ -240,7 +240,7 @@ async function alreadyUsed(env, nonce) {
 async function handleAct(request, env, url) {
   const m = url.pathname.match(ACT_PATH);
   if (!m) return actPage(env, 404, "Not a link", "<h1>That link isn't valid</h1><p>Open the button from the email again.</p>");
-  if (!env.ACTION_SIGNING_KEY) return actPage(env, 503, "Not set up", "<h1>One-click actions aren't set up yet</h1><p>The Worker has no ACTION_SIGNING_KEY. The setup steps are in SETUP.md under one-click actions.</p>");
+  if (!env.ACTION_SIGNING_KEY) return actPage(env, 503, "Not set up", "<h1>One-click actions aren't set up yet</h1><p>The Worker has no ACTION_SIGNING_KEY. The setup steps are in docs/cloudflare-setup.md.</p>");
   if (request.method !== "GET" && request.method !== "POST") return actPage(env, 405, "Not allowed", "<h1>Not allowed</h1>");
   let p;
   try {
