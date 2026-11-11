@@ -134,6 +134,8 @@ def trim(brief_text, start, end):
             if line.startswith("  ") and line.strip():
                 if keep_child:
                     kept.append(line)
+                    if items and items[-1]["id"] == f"i{n}" and not items[-1].get("desc"):
+                        items[-1]["desc"] = line.strip()
                 continue
             keep_child = False
             if not line.strip():
@@ -179,6 +181,91 @@ def archived(brief_text):
         m = re.match(r"^- (\S+) <(\S*)>$", line) if inside else None
         if m:
             out.append({"repo": m.group(1), "url": m.group(2)})
+    return out
+
+
+def busiest(brief_text):
+    """Repos in the brief's "Busiest public repos" section, busiest first."""
+    out, inside = [], False
+    for line in brief_text.splitlines():
+        if line.startswith("## "):
+            inside = line[3:].startswith("Busiest")
+            continue
+        m = re.match(r"^- (\S+): ", line) if inside else None
+        if m:
+            out.append(m.group(1))
+    return out
+
+
+# News value, used to order what each report should lead with. A rough, code-only
+# reading of titles: it never decides what is written, only what comes first.
+STRONG = re.compile(r"(\b\d+(\.\d+)?x (faster|smaller|less)\b|\bhalve[sd]?\b|\blaunch\w*|\bfirst release\b|\binitial (public )?release\b|"
+                    r"\bprepare for v?\d+\.0|(?<![\d.])v?[1-9]\d*\.0(\.0)?\b(?![.-])|\bintroduc\w+)", re.I)
+MEDIUM = re.compile(r"\b(faster|speed ?up|speeds? up|quicker|release[sd]?|publish\w*|new|support\w*|add\w*|ship\w*|redesign\w*)\b", re.I)
+FEATURE = re.compile(r"^feat\b", re.I)
+SMALL = re.compile(r"^(chore|ci|test|tests|docs?|style|build|deps|lint|bump|typo|format|refactor)\b|\b(bump|chore|typo|lint|"
+                   r"formatting|dependabot|update dependenc\w*|readme)\b|\b(update|bump|upgrade) [\w@/.-]+( cask)? to v?\d", re.I)
+FILLER_REPO = re.compile(r"(^|/)\.github$|\.github\.io$|release-key|signing key|dotfiles", re.I)
+KIND_SCORE = {"birth": 9, "release": 8, "video": 8, "pr": 4, "commit": 2, "open_pr": 1}
+KIND_LABEL = {"birth": "new repo", "release": "release", "video": "video", "pr": "merged PR", "commit": "commit", "open_pr": "open PR"}
+
+
+def major_release(title):
+    m = re.search(r"v?(\d+)\.(\d+)(?:\.(\d+))?", title or "")
+    return bool(m) and m.group(1) != "0" and m.group(2) == "0" and m.group(3) in (None, "0")
+
+
+def filler_birth(item):
+    owner, _, name = item["repo"].partition("/")
+    return bool(FILLER_REPO.search(item["repo"]) or FILLER_REPO.search(item["title"])) or (name and name.lower() == owner.lower())
+
+
+def news_score(item, busy):
+    score = KIND_SCORE.get(item["kind"], 0)
+    if item["kind"] in ("pr", "commit", "open_pr"):
+        title = item["title"]
+        if SMALL.search(title):
+            score -= 3
+        elif STRONG.search(title):
+            score += 4
+        elif MEDIUM.search(title) or FEATURE.search(title) or STRONG.search(item.get("desc", "")[:200]):
+            score += 2
+    if item["kind"] == "release" and major_release(item["title"]):
+        score += 2
+    if item["kind"] == "birth" and filler_birth(item):
+        score = 2
+    if item["repo"] and busy and item["repo"] == busy[0]:
+        score += 1
+    return score
+
+
+def highlights(items, gone, busy, limit=8):
+    """The window's most newsworthy items, best first: [{"id", "kind", "label", "repo", "title", "url", "score"}].
+
+    Several releases of one repo count once (its newest), and each repo gets at
+    most two entries (three for the busiest), so one busy repo cannot crowd out a launch elsewhere.
+    Archived repos come last but are always listed.
+    """
+    scored, seen_release, per_repo = [], set(), {}
+    for item in items:
+        if item["kind"] == "release":
+            if item["repo"] in seen_release:
+                continue
+            seen_release.add(item["repo"])
+        scored.append((news_score(item, busy), item))
+    scored.sort(key=lambda t: (-t[0], t[1]["date"] and -int(t[1]["date"].replace("-", ""))))
+    out = []
+    for score, item in scored:
+        if score <= 0 or per_repo.get(item["repo"], 0) >= (3 if busy and item["repo"] == busy[0] else 2):
+            continue
+        per_repo[item["repo"]] = per_repo.get(item["repo"], 0) + 1
+        out.append({"id": item["id"], "kind": item["kind"], "label": KIND_LABEL[item["kind"]], "repo": item["repo"],
+                    "title": item["title"], "url": item["url"], "score": score})
+        if len(out) >= limit:
+            break
+    for g in gone:
+        out.append({"id": "", "kind": "archived", "label": "archived repo", "repo": g["repo"], "title": "archived or gone",
+                    "url": g["url"], "score": 7})
     return out
 
 
@@ -244,7 +331,8 @@ def prepare(paper, kind=None, today=None, now=None):
         gone = archived(text)
         prof = paper / "profiles" / f"{pid}.md"
         person = {**entry, "start": start.isoformat(), "end": end.isoformat(), "brief": trimmed, "items": items,
-                  "archived": gone, "numbers": numbers_line(text), "titles": load_exact_titles(paper, pid)}
+                  "archived": gone, "numbers": numbers_line(text), "titles": load_exact_titles(paper, pid),
+                  "highlights": highlights(items, gone, busiest(text))}
         if not items and not gone:
             people.append({**person, "status": "quiet"})
             continue

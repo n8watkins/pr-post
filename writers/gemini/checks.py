@@ -102,6 +102,44 @@ def check_text(label, text, input_text, cap=None):
     return problems
 
 
+YOU_RE = re.compile(r"\b(you|your|yours|yourself|you're|you've|you'll|you'd)\b", re.I)
+HYPE_RE = re.compile(r"\b(incredible|incredibly|massive|massively|gorgeous|huge|insane|amazing|stunning|blazing|"
+                     r"game[- ]chang\w*|revolution\w*|groundbreaking|epic|smoother than ever|flurry)\b", re.I)
+MD_LINK = re.compile(r"\[([^\]]*)\]\((\S+?)\)")
+BULLET_WORDS = 25
+# Weekly sections whose bullets are commentary rather than items, so they need no link.
+UNLINKED_SECTIONS = ("tl;dr", "worth asking", "how you look")
+
+
+def second_person(text):
+    """Whether the text, outside its links, addresses someone as "you"."""
+    return bool(YOU_RE.search(MD_LINK.sub(r"\1", strip_urls(text or ""))))
+
+
+def hype(text):
+    return sorted({m.group(0).lower() for m in HYPE_RE.finditer(strip_urls(text or ""))})
+
+
+def bullets(md):
+    """[(section heading in lowercase, bullet text)] for every top-level "- " bullet of a Markdown body."""
+    out, section = [], ""
+    for line in (md or "").splitlines():
+        if line.startswith("#"):
+            section = line.lstrip("#").strip().lower()
+        elif line.startswith("- "):
+            out.append((section, line[2:].strip()))
+    return out
+
+
+def link_urls(text):
+    return [u for _, u in MD_LINK.findall(text or "")]
+
+
+def words_outside_links(text):
+    """Words a bullet says in its own voice: link labels and addresses do not count."""
+    return words(MD_LINK.sub(" ", text or ""))
+
+
 def no_em_dash(value):
     """Replace the em dash everywhere in a JSON-like value (the paper never prints it)."""
     if isinstance(value, str):

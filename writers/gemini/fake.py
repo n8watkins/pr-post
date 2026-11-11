@@ -12,18 +12,26 @@ ITEM = re.compile(r"^- \[(i\d+)\] (\S+) (.*?) <(https?://\S+)>$", re.M)
 PERSON = re.compile(r"^### (.+) \(id: ([a-z0-9-]+)\)$", re.M)
 
 
+TOP = re.compile(r"^#### Top news.*?\n\n(.*?)\n\n", re.M | re.S)
+
+
 def _items(text):
     return [{"id": m.group(1), "title": m.group(3), "url": m.group(4)} for m in ITEM.finditer(text)]
 
 
 def _person_answer(name, block, schema_props, required, weekly):
-    items = _items(block)
+    top = TOP.search(block)
+    items = _items(top.group(1)) if top else []
+    items = items or _items(block)
     first = items[0] if items else None
-    link = f"[{first['title']}]({first['url']})" if first else "their repos"
+    second = items[1] if len(items) > 1 else first
+    link = lambda i: f"[{i['title']}]({i['url']})" if i else "their repos"
+    you = "Voice: Second person" in block or "This person is the reader" in block
+    who = "You" if you else name
     if weekly:
-        body = f"## TL;DR\n- {name} shipped {link}.\n\n## Work\n- Kept busy, see {link}.\n"
+        body = f"## TL;DR\n- {who} shipped {link(first)}.\n\n## Work\n- {who} kept the project moving, see {link(first)}.\n"
     else:
-        body = f"- {name} shipped {link}.\n"
+        body = f"- {who} shipped a change to the project: {link(first)}.\n- {who} also kept working on it: {link(second)}.\n"
     answer = {
         "report_md": body,
         "story": {"beat": "Tools desk", "headline": f"{name} keeps shipping", "summary": f"{name} had a steady stretch."},

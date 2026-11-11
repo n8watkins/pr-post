@@ -360,7 +360,7 @@ class CliTest(FixtureCase):
         self.assertIn("gemini/profiles/finn-fixture.md", after)  # no profile yet, so the writer drafted one
         self.assertNotIn("profiles/finn-fixture.md", after)  # and Claude's profiles are untouched
         edition = json.loads((self.paper / "gemini" / "editions" / "2026-11-14-weekly.json").read_text())
-        self.assertEqual((edition["source"], edition["prompt_version"], edition["mode"]), ("mock", "v1", "split"))
+        self.assertEqual((edition["source"], edition["prompt_version"], edition["mode"]), ("mock", pipeline.PROMPT_VERSION, "split"))
         self.assertEqual(len(edition["stories"]), 18)  # everyone but the lead, quiet people included
         self.assertEqual([b["repo"] for b in edition["births"]], ["esme-fixture/fresh-idea"])
         self.assertEqual([o["name"] for o in edition["obituaries"]], ["old-thing"])

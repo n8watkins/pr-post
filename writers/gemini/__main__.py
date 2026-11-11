@@ -55,6 +55,7 @@ def usage_summary(prep, mode, model, prompts, calls, failed, wall):
         "input_tokens": total("input_tokens"), "output_tokens": total("output_tokens"), "thinking_tokens": total("thinking_tokens"),
         "latency_s": round(sum(c["latency_s"] for c in calls), 3), "wall_s": round(wall, 3),
         "checks_failing": [c["id"] or c["stage"] for c in calls if c["problems_final"]],
+        "fallback": [c["id"] for c in calls if c.get("fallback")] + [i for c in calls for i in c.get("fallback_ids", [])],
         "failed": failed,
         "calls": calls,
     }
@@ -103,7 +104,8 @@ def run(args, say=print):
         client, model = fake.FakeClient(), "mock"
     else:
         try:
-            client = api.Client(args.model, temperature=args.temperature, thinking_level=args.thinking_level)
+            temperature = args.temperature if args.temperature is not None else prompts["settings"].get("temperature")
+            client = api.Client(args.model, temperature=temperature, thinking_level=args.thinking_level)
         except api.GeminiError as e:
             sys.exit(f"gemini: {e}")
         model = args.model
@@ -113,6 +115,7 @@ def run(args, say=print):
     answers, front, lead_id, failed = runner_fn(runner, prep, previous)
     files, edition = pipeline.assemble(prep, answers, front, lead_id, model, prompts, mode)
     usage = usage_summary(prep, mode, model, prompts, runner.calls, failed, time.monotonic() - started)
+    usage["temperature"] = getattr(client, "temperature", None)
     files[f"usage/{prep['date']}.json"] = json.dumps(usage, indent=1, ensure_ascii=False) + "\n"
     write_files(root, files)
 
@@ -123,6 +126,8 @@ def run(args, say=print):
         f"{1 if edition else 0} edition under gemini/{'single/' if args.single else ''}.")
     if usage["checks_failing"]:
         say(f"Warning: {len(usage['checks_failing'])} answers still fail a check after their retry (see the usage file).")
+    if usage["fallback"]:
+        say(f"Note: {len(usage['fallback'])} reports were built from the brief by code because the answer was missing or wrong (see the usage file).")
     if failed:
         say(f"Warning: {len(failed)} answers could not be used (see the usage file).")
     if args.verbose:
@@ -159,7 +164,7 @@ def main(argv=None):
     r.add_argument("--model", default=api.DEFAULT_MODEL, help=f"Gemini model (default {api.DEFAULT_MODEL})")
     r.add_argument("--prompt-version", default=pipeline.PROMPT_VERSION, help="folder under writers/gemini/prompts/")
     r.add_argument("--rpm", type=float, default=10, help="at most this many requests a minute (default 10, under the free tier's limit; 0 for no pacing)")
-    r.add_argument("--temperature", type=float, default=None, help="sampling temperature (default: the model's)")
+    r.add_argument("--temperature", type=float, default=None, help="sampling temperature (default: the prompt version's settings.json, else the model's)")
     r.add_argument("--thinking-level", default=None, help="Gemini thinkingLevel, for models that think (default: the model's)")
     r.add_argument("--verbose", action="store_true", help="list people, requests and paths (not for public logs)")
     args = ap.parse_args(argv)
