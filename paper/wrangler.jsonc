@@ -22,8 +22,10 @@
     "SITE_TITLE": "The Pull Request Post", // the name the password prompt shows
     "SITE_PREFIX": "site/",
     "GITHUB_REPO": "n8watkins/pr-post",
-    "ACCESS_TEAM_DOMAIN": "",
-    "ACCESS_AUD": "",
+    // Cloudflare Access (Zero Trust team white-poetry-96ec): the Worker verifies
+    // every sign-in against this team and the app's audience tag. Neither is secret.
+    "ACCESS_TEAM_DOMAIN": "white-poetry-96ec.cloudflareaccess.com",
+    "ACCESS_AUD": "78b00f8da1aabd80cccb906f1452687068f4d9b3df0d210cdadf61f2754f5625", // gitleaks:allow (public: sent in every Access login redirect)
     // The sender's display name on the paper's emails (worker/email.js).
     "EMAIL_FROM_NAME": "The Pull Request Post"
   },
