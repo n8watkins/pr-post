@@ -4,7 +4,7 @@
 //
 // R2 holds files: the paper's folders under "paper/" (data/, stats/, briefs/,
 // reports/, editions/, summaries/, follow/ mini reports, notes/, logs/,
-// previews/, backups/) and the built site under SITE_PREFIX (default "site/").
+// previews/, backups/, gemini/, reviews/) and the built site under SITE_PREFIX (default "site/").
 // Each object carries its SHA-256 in customMetadata.sha256, so clients upload
 // only what changed.
 //
@@ -35,7 +35,10 @@ const SHA_RE = /^[0-9a-f]{64}$/;
 
 // Folders of the paper kept in R2. follow/state.json and follow/actions.jsonl
 // live in D1 instead, and watchlist.toml and profiles/ are rendered from D1.
-export const PAPER_DIRS = ["data", "stats", "briefs", "reports", "editions", "summaries", "follow", "notes", "logs", "previews", "backups"];
+// gemini/ is the Gemini writer's parallel output and reviews/ the blind
+// comparisons (docs/writers.md); the Claude routine's writer token sees neither,
+// so its runs stay independent of them.
+export const PAPER_DIRS = ["data", "stats", "briefs", "reports", "editions", "summaries", "follow", "notes", "logs", "previews", "backups", "gemini", "reviews"];
 const IN_D1 = new Set(["follow/state.json", "follow/actions.jsonl"]);
 export const WRITER_READ = ["briefs", "data", "reports", "editions", "summaries"];
 export const WRITER_WRITE = ["reports", "editions"];

@@ -59,7 +59,7 @@ This is how the owner's paper runs (`paper/` in this repository).
 | The watch list (people, their status, sources and socials) and the other `watchlist.toml` tables | D1 `people` and `settings` | You on the site; jobs read it |
 | Profiles | D1 `people.profile` | Jobs; the writer may only add to the end |
 | Who to follow state, the one-click action log | D1 `follow_candidates`, `follow_meta`, `actions` | Jobs |
-| `data/`, `stats/`, `briefs/`, `reports/`, `editions/`, `summaries/`, `follow/` mini reports, `notes/`, `logs/`, `previews/`, `backups/` | R2, under `paper/` | Jobs; the writer reads briefs, data, reports, editions and summaries and writes reports and editions |
+| `data/`, `stats/`, `briefs/`, `reports/`, `editions/`, `summaries/`, `follow/` mini reports, `notes/`, `logs/`, `previews/`, `backups/`, `gemini/` (the Gemini writer's parallel output), `reviews/` (blind writer comparisons) | R2, under `paper/` | Jobs; the writer reads briefs, data, reports, editions and summaries and writes reports and editions (never `gemini/` or `reviews/`) |
 | The built site | R2, under `SITE_PREFIX` (`site/`) | The publish job; the Worker serves it after sign-in |
 
 Bind a D1 database as `DB` (apply `paper/migrations/`) and an R2 bucket as `STORE`; `paper/wrangler.jsonc` is a complete example, including a staging Worker on the same storage that serves `site-next/`.

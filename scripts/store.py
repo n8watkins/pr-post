@@ -42,7 +42,7 @@ import urllib.request
 from pathlib import Path
 
 # Must match worker/store.js.
-PAPER_DIRS = ("data", "stats", "briefs", "reports", "editions", "summaries", "follow", "notes", "logs", "previews", "backups")
+PAPER_DIRS = ("data", "stats", "briefs", "reports", "editions", "summaries", "follow", "notes", "logs", "previews", "backups", "gemini", "reviews")
 IN_D1 = {"follow/state.json", "follow/actions.jsonl"}
 SNAPSHOT = ".store.json"
 CHUNK = 1_500_000  # bytes of follow state per request
