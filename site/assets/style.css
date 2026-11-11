@@ -433,7 +433,7 @@ footer.colophon { max-width: 1120px; margin: 22px auto 0; font-family: var(--mon
 .people-changes ul { list-style: none; padding: 0; margin: 10px 0 0; font-size: 16px; }
 .people-changes li { padding: 4px 0; border-bottom: 1px solid var(--rule); }
 .people-help { font-size: 16px; margin-top: 10px; }
-#people-add .wide { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+#people-add div.wide { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
 @media (max-width: 720px) {
   .people-row { grid-template-columns: auto minmax(0, 1fr); }
   .people-row .set-actions { grid-column: 1 / -1; justify-content: flex-start; }
