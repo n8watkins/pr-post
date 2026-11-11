@@ -438,7 +438,7 @@ class CompareTest(FixtureCase):
         review.write_text("# Review\n\n## Verdict\nWriter A missed the release.\nWriter B was tighter.\n")
         with redirect_stdout(io.StringIO()):
             compare_cli.main(["unblind", "--paper", str(self.paper), "--date", "2026-11-14", "--price-in", "0.1", "--price-out", "0.4"])
-        text = (self.paper / "reviews" / "2026-11-14.md").read_text()
+        text = (self.paper / "reviews" / "2026-11-14-claude-vs-gemini.md").read_text()
         a, b = key["A"]["writer"], key["B"]["writer"]
         self.assertIn(f"Writer A was {a} and Writer B was {b}.", text)
         self.assertIn(f"{a} (Writer A) missed the release.", text)
