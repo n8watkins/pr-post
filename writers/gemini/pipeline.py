@@ -210,6 +210,7 @@ NEWS_SCORE = 8  # a highlight this newsworthy (a release, new repo, video or hea
 OWN_WORDS = 4   # a bullet must say at least this much in its own words, not only a linked title
 TOP_CHOICES = 3  # the report must cover at least one of the top items prepare.py ranked
 LABEL_WORDS = 6  # a link label longer than this is a pasted title
+SLUG_START = re.compile(r"^\[?[\w.-]+/[\w.-]+\b")  # a bullet that opens with "owner/repo" reads like a log, not a sentence
 
 
 def release_only(bullet, archived=()):
@@ -279,7 +280,7 @@ def check_person(answer, person, kind, input_text):
         problems.append(f"{person['name']} is not the reader, but the report or story says \"you\" or \"your\"; "
                         f"write about {first_name(person)} in the third person")
     quiet = bool(QUIET_RE.match(body.strip()))
-    if person["self"] and not quiet and not checks.second_person(body):
+    if person["self"] and not quiet and not checks.second_person(body, person.get("brief", "")):
         problems.append("this person is the reader: write the report in the second person (\"you shipped...\")")
     # Quiet only when the brief is quiet.
     news = [h for h in person.get("highlights") or [] if h["score"] >= NEWS_SCORE]
@@ -297,6 +298,10 @@ def check_person(answer, person, kind, input_text):
         if bare:
             problems.append("these bullets are only a linked title; say in plain words what changed and why it matters, then link: "
                             + "; ".join(f"\"{b[:60]}\"" for b in bare[:3]))
+        slugs = [b for _, b in item_bullets if SLUG_START.match(b)]
+        if slugs:
+            problems.append("start each bullet with the person or the short project name in a sentence (\"Simon released...\", "
+                            "\"Datasette now...\"), not with \"owner/repo\": " + "; ".join(f"\"{b[:50]}\"" for b in slugs[:3]))
         long_labels = [label for _, b in item_bullets for label, _ in checks.MD_LINK.findall(b) if checks.words(label) > LABEL_WORDS]
         if long_labels:
             problems.append("link labels must be short (\"PR 15162\", \"v1.5.2\", the repo name), not whole titles: "

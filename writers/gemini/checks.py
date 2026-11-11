@@ -14,6 +14,7 @@ EM_DASH = "\u2014"
 URL_RE = re.compile(r"https?://[^\s<>()\]\"']+")
 NUMBER_RE = re.compile(r"(?<![\d.,])\d+(?:[.,]\d+)*")
 WORD_RE = re.compile(r"[\w'][\w'.-]*")
+HASH_RE = re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b")  # a commit hash is a name, not a number
 MD_LINK_TARGET = re.compile(r"\]\((\S+?)\)")
 
 
@@ -29,7 +30,7 @@ def words(text):
 def numbers(text):
     """The numbers in `text`, outside links, normalized so "07", "7" and "1,000"/"1000" compare equal."""
     out = set()
-    for raw in NUMBER_RE.findall(strip_urls(text)):
+    for raw in NUMBER_RE.findall(HASH_RE.sub(" ", strip_urls(text))):
         plain = raw.replace(",", "")
         try:
             out.add(str(int(plain)) if plain.isdigit() else str(float(plain)))

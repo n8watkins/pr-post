@@ -8,6 +8,8 @@ $report_rules
 $fields
 Each person's "Voice" line says whether to write "you" (only the reader) or their name and "they" (everyone else).
 Each person's "Top news" list is ranked by code: their report starts with those items, in plain words, not with a minor fix.
+Write every bullet as a sentence about the person or the project ("Simon released Datasette 1.0a42, which..."), using the short project name, never "owner/repo created ...".
+Give each person the same care as if theirs were the only report: say what each change does for the people who use it.
 
 ## The front page
 

@@ -228,6 +228,10 @@ class ChecksTest(unittest.TestCase):
         self.assertTrue(checks.second_person("Dax started bank for your team.", brief))
         self.assertTrue(checks.second_person("You shipped it."))
 
+    def test_a_short_commit_hash_is_not_a_number(self):
+        self.assertEqual(checks.untraceable_numbers("Fixed it in [commit 01a2762](https://x/commit/01a2762203b273c2).", "nothing"), [])
+        self.assertEqual(checks.untraceable_numbers("Merged 4817 PRs.", "nothing"), ["4817"])
+
     def test_copied_runs(self):
         source = "Released Datasette 1.0a42 with a redesigned homepage showing a searchable catalog of tables."
         self.assertTrue(checks.copied_runs("Simon released Datasette 1.0a42 with a redesigned homepage showing a searchable catalog.", source))
@@ -428,6 +432,10 @@ class V2ChecksTest(FixtureCase):
             self.skipTest("every fixture item is a top item")
         body = "".join(f"- Ada kept the project moving along nicely: [{i['title']}]({i['url']}).\n" for i in minor[:2])
         self.assertTrue(any("biggest news" in p for p in self.problems(self.other, body)))
+
+    def test_a_bullet_does_not_open_with_owner_slash_repo(self):
+        body = f"- ada-fixture/tool-1 created a thing for builds in [tool-1]({self.top['url']}).\n" + self.good("Ada")
+        self.assertTrue(any("not with \"owner/repo\"" in p for p in self.problems(self.other, body)))
 
     def test_link_labels_are_short_and_release_bullets_need_no_more(self):
         long = f"- Ada made the build faster for everyone: [{'a long pasted pull request title ' * 2}]({self.top['url']}).\n"
