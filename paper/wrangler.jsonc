@@ -24,8 +24,6 @@
     "GITHUB_REPO": "n8watkins/pr-post",
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": "",
-    // The SNS topic SES reports bounces and complaints to (the TopicArn output of paper/aws/ses.yml).
-    "SES_TOPIC_ARN": "",
     // The sender's display name on the paper's emails (worker/email.js).
     "EMAIL_FROM_NAME": "The Pull Request Post"
   },
@@ -54,7 +52,6 @@
         "GITHUB_REPO": "n8watkins/pr-post",
         "ACCESS_TEAM_DOMAIN": "",
         "ACCESS_AUD": "",
-        "SES_TOPIC_ARN": "",
         "EMAIL_FROM_NAME": "The Pull Request Post"
       },
       "d1_databases": [

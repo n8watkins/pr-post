@@ -1,4 +1,4 @@
-"""scripts/email_lib.py: the jobs' email through the paper's Worker (EMAIL_VIA=worker), end to end against the real Worker code."""
+"""scripts/email_lib.py: the jobs' email through the paper's Worker, end to end against the real Worker code."""
 
 import os
 import shutil
@@ -17,24 +17,18 @@ import email_lib as E  # noqa: E402
 JOBS = "j" * 40
 
 
-def watch(to="owner@example.com", via="resend"):
-    return config.parse(f'[email]\nto = "{to}"\nvia = "{via}"\n[delivery]\nemail = true\n')
+def watch(to="owner@example.com"):
+    return config.parse(f'[email]\nto = "{to}"\n[delivery]\nemail = true\n')
 
 
 class Choice(unittest.TestCase):
-    def test_email_via_overrides_the_watchlist(self):
-        with mock.patch.dict(os.environ, {"EMAIL_VIA": "worker", "PR_POST_API": "https://paper.example", "PR_POST_TOKEN": JOBS}):
-            self.assertEqual(E.transport(watch()), ("worker", True))
+    def test_it_says_whether_the_worker_settings_are_there(self):
+        with mock.patch.dict(os.environ, {"PR_POST_API": "https://paper.example", "PR_POST_TOKEN": JOBS}):
+            self.assertTrue(E.ready())
             self.assertEqual(E.describe(watch()), "the paper's Worker (PR_POST_API and PR_POST_TOKEN set)")
-        with mock.patch.dict(os.environ, {"EMAIL_VIA": "", "RESEND_API_KEY": ""}):
-            self.assertEqual(E.transport(watch(via="worker"))[0], "worker")
-            self.assertEqual(E.transport(watch())[0], "resend")
-        with mock.patch.dict(os.environ, {"EMAIL_VIA": "carrier-pigeon"}):
-            with self.assertRaises(SystemExit):
-                E.transport(watch())
 
     def test_without_the_worker_settings_it_skips(self):
-        with mock.patch.dict(os.environ, {"EMAIL_VIA": "worker", "PR_POST_API": "", "PR_POST_TOKEN": ""}):
+        with mock.patch.dict(os.environ, {"PR_POST_API": "", "PR_POST_TOKEN": ""}):
             self.assertEqual(E.check_delivery(watch(), dry_run=False), "PR_POST_API or PR_POST_TOKEN not set; skipping email.")
             self.assertIsNone(E.check_delivery(watch(), dry_run=True))
 
@@ -52,7 +46,7 @@ class EndToEnd(unittest.TestCase):
         self.server = subprocess.Popen(["node", str(HERE / "serve_worker.mjs")], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env, text=True)
         line = self.server.stdout.readline()
         self.assertTrue(line.startswith("listening"), line)
-        self.env = mock.patch.dict(os.environ, {"EMAIL_VIA": "worker", "PR_POST_API": f"http://127.0.0.1:{line.split()[1]}", "PR_POST_TOKEN": JOBS})
+        self.env = mock.patch.dict(os.environ, {"PR_POST_API": f"http://127.0.0.1:{line.split()[1]}", "PR_POST_TOKEN": JOBS})
         self.env.start()
 
     def tearDown(self):

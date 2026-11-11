@@ -1,4 +1,4 @@
-"""Shared parts of the emails: a short, robust HTML shell and sending, through the paper's Worker, Amazon SES or Resend.
+"""Shared parts of the emails: a short, robust HTML shell, and sending through the paper's Worker.
 
 Email clients are the hard part. The rules this module follows:
 
@@ -21,11 +21,8 @@ The look follows the web edition: ink on newsprint, a red accent, serif heads.
 import html
 import json
 import os
-import urllib.error
-import urllib.request
 from pathlib import Path
 
-import ses
 from md import safe_url
 
 SERIF = "Georgia,'Times New Roman',serif"
@@ -145,57 +142,24 @@ def shell(title, preheader, kicker, heading, subline, rows, footer):
 </body></html>"""
 
 
-def send(key, sender, to, subject, page, text):
-    """Send one email through Resend. Returns the Resend id; raises SystemExit with Resend's reason on refusal."""
-    payload = {"from": sender, "to": [to], "subject": subject, "html": page, "text": text}
-    req = urllib.request.Request(
-        "https://api.resend.com/emails",
-        data=json.dumps(payload).encode(),
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json", "User-Agent": "pr-post"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.load(r).get("id")
-    except urllib.error.HTTPError as e:
-        raise SystemExit(f"Resend refused the email ({e.code}): {e.read().decode()[:500]}") from None
-
-
-def via(watch):
-    """The paper's transport: EMAIL_VIA when set (the switch the paper workflows pass), else [email] via."""
-    chosen = (os.environ.get("EMAIL_VIA") or "").strip() or watch["email"]["via"]
-    if chosen not in ("worker", "ses", "resend"):
-        raise SystemExit(f'EMAIL_VIA must be "worker", "ses" or "resend", not "{chosen}".')
-    return chosen
-
-
-def transport(watch):
-    """How this paper sends: ("worker", True or None), ("ses", credentials or None) or ("resend", key or None)."""
-    chosen = via(watch)
-    if chosen == "worker":
-        return "worker", (True if os.environ.get("PR_POST_API") and os.environ.get("PR_POST_TOKEN") else None)
-    if chosen == "ses":
-        return "ses", ses.credentials()
-    return "resend", os.environ.get("RESEND_API_KEY") or None
-
-
-NAMES = {"worker": ("the paper's Worker", "PR_POST_API and PR_POST_TOKEN"), "ses": ("Amazon SES", "AWS credentials"), "resend": ("Resend", "RESEND_API_KEY")}
-MISSING = {"worker": "PR_POST_API or PR_POST_TOKEN not set; skipping email.", "ses": "No AWS credentials; skipping email.", "resend": "RESEND_API_KEY not set; skipping email."}
+def ready():
+    """True when the jobs can reach the paper's Worker: PR_POST_API and PR_POST_TOKEN (its JOBS_TOKEN) are set."""
+    return bool(os.environ.get("PR_POST_API") and os.environ.get("PR_POST_TOKEN"))
 
 
 def describe(watch):
-    """A line for dry runs: which service, and whether its credentials are there. Never the values."""
-    chosen, creds = transport(watch)
-    name, what = NAMES[chosen]
-    return f"{name} ({what} {'set' if creds else 'not set'})"
+    """A line for dry runs: how the email goes, and whether its settings are there. Never the values."""
+    return f"the paper's Worker (PR_POST_API and PR_POST_TOKEN {'set' if ready() else 'not set'})"
 
 
 def worker_send(kind, to, subject, page, text, key):
     """Send one email through the paper's Worker (POST /api/email/send with JOBS_TOKEN). Returns the message id.
 
-    The key makes a retry safe: the same key is sent once, so a lost answer
-    can be retried without a second email.
+    The Worker sends it through mailroom, or its own Cloudflare Email Service
+    binding (docs/email.md). The key makes a retry safe: the same key is sent
+    once, so a lost answer can be retried without a second email.
     """
-    import store  # the Worker client; imported here so the other transports don't need it
+    import store  # the Worker client; imported here so rendering a preview needs nothing else
 
     api = store.Api()
     body = {"kind": kind, "to": to, "subject": subject, "html": page, "text": text, "key": key}
@@ -217,7 +181,7 @@ def send_key(kind, to, subject, text):
 
 
 def suppressed(paper, to):
-    """Why `to` must not get email (a hard bounce or a complaint recorded by SES), or None.
+    """Why `to` must not get email (a hard bounce or a complaint mailroom reported), or None.
 
     A private paper's storage writes suppressed.json next to watchlist.toml
     (scripts/store.py); without it nothing is suppressed.
@@ -241,21 +205,12 @@ def check_delivery(watch, dry_run, paper=None):
     if paper is not None and (why := suppressed(paper, watch["email"]["to"])):
         # Sending again to an address that bounced or complained hurts the sender's reputation.
         raise SystemExit(f"Not sending: the recipient is suppressed ({why}). Fix the address, then clear it on the site.")
-    chosen, creds = transport(watch)
-    if not creds and not dry_run:
-        return MISSING[chosen]
+    if not ready() and not dry_run:
+        return "PR_POST_API or PR_POST_TOKEN not set; skipping email."
     return None
 
 
 def deliver(watch, subject, page, text, kind="digest"):
-    """Send one email to [email] to through the paper's transport. Returns the provider's message id."""
-    cfg = watch["email"]
-    chosen, creds = transport(watch)
-    if chosen == "worker":
-        return worker_send(kind, cfg["to"], subject, page, text, send_key(kind, cfg["to"], subject, text))
-    if chosen == "ses":
-        try:
-            return ses.send(cfg["from"], cfg["to"], subject, page, text, cfg["region"], cfg["configuration_set"], creds)
-        except ses.SesError as e:
-            raise SystemExit(str(e)) from None
-    return send(creds, cfg["from"], cfg["to"], subject, page, text)
+    """Send one email to [email] to through the paper's Worker. Returns the message id."""
+    to = watch["email"]["to"]
+    return worker_send(kind, to, subject, page, text, send_key(kind, to, subject, text))

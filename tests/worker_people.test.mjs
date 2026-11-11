@@ -87,7 +87,7 @@ test("adding someone starts the draft job with an opaque id, and refuses duplica
 
 test("a suppressed address can be cleared", async () => {
   const env = makeEnv();
-  env.DB.raw.exec(`INSERT INTO email_events (at, type, address, detail, sns_id) VALUES ('2026-11-09', 'Complaint', 'me@example.com', 'abuse', 's1')`);
+  env.DB.raw.exec(`INSERT INTO email_events (at, type, address, detail, event_id) VALUES ('2026-11-09', 'Complaint', 'me@example.com', 'abuse', 's1')`);
   assert.equal((await (await call(env, "/api/people")).json()).suppressed.length, 1);
   assert.equal((await call(env, "/api/email/clear", "POST", { address: "ME@example.com" })).status, 200);
   assert.equal((await (await call(env, "/api/people")).json()).suppressed.length, 0);

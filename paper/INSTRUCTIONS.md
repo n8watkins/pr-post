@@ -108,7 +108,7 @@ Steps 8 to 10 each deliver to one place; do only the ones set to `true` under `[
     If the connector is not available, skip this step and say so.
 
 Email: nothing to do.
-The publish job in GitHub Actions emails the issue as one short digest (the `tldr`, one line per person and a link to the web edition) through Amazon SES.
+The publish job in GitHub Actions emails the issue as one short digest (the `tldr`, one line per person and a link to the web edition) through the paper's Worker and mailroom.
 Do not try to send email yourself.
 
 ## Weekly report format

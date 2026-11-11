@@ -1,68 +1,39 @@
 # Email
 
 pr-post can send two short emails: a digest of written reports (`scripts/send_email.py`) and the Who to follow picks (`scripts/send_follow.py`).
-Both go through one of two services, chosen with `[email] via`:
+Both need a private paper on Cloudflare (docs/private-mode.md): the jobs render each email and hand it to the paper's Worker, which sends it.
+No email service key is needed anywhere.
 
 ```toml
 [email]
 to = "you@example.com"
-from = "PR Post <paper@post.example.com>"
-via = "ses"                    # "ses" (Amazon SES) or "resend"
-region = "us-east-1"           # SES only
-configuration_set = "pr-post"  # SES only: reports bounces and complaints
 
 [delivery]
 email = true
 ```
 
 `--dry-run` runs every check a real send would and sends nothing.
-It never prints the recipient, the subject or a key, because dry runs often run in public Actions logs.
+It never prints the recipient, the subject or a token, because dry runs often run in public Actions logs.
 
-## Through the paper's Worker (`via = "worker"`)
+## How a send works
 
-With a private paper on Cloudflare, the jobs can hand each email to the paper's Worker instead: they POST it to `/api/email/send` with `JOBS_TOKEN` (`PR_POST_API` and `PR_POST_TOKEN`, which the paper workflows already have), and the Worker sends it (`worker/email.js`).
-No email key is needed anywhere.
-The Worker sends through one of:
+1. The job renders the email and POSTs it to the Worker's `/api/email/send` with `JOBS_TOKEN` (`PR_POST_API` and `PR_POST_TOKEN`, which the paper workflows already have).
+2. The Worker (`worker/email.js`) checks the email, refuses an address that is suppressed, and sends it through one of:
+   - a `MAILROOM` service binding to [mailroom](https://github.com/n8watkins/mailroom), the owner's Worker that sends every app's email through Cloudflare Email Service, with caps per app and bounce handling (the owner's paper, `paper/wrangler.jsonc`);
+   - a `send_email` binding named `EMAIL` and an `EMAIL_FROM` variable on a domain onboarded for Cloudflare Email Sending, for a paper on another Cloudflare account.
+3. Each email carries a key made from its recipient, subject and text, so a retried job never sends it twice.
 
-- a `MAILROOM` service binding to [mailroom](https://github.com/n8watkins/mailroom), the owner's Worker that sends every app's email through Cloudflare Email Service with caps and bounce handling (the owner's paper, `paper/wrangler.jsonc`);
-- a `send_email` binding named `EMAIL` and an `EMAIL_FROM` variable on a domain onboarded for Cloudflare Email Sending, for a paper on another account.
+The sender's display name is the Worker's `EMAIL_FROM_NAME` variable (or `SITE_TITLE`).
+With mailroom the address is `prpost@n8builds.dev`; the `[email] from` of earlier versions is ignored, as are `via`, `region` and `configuration_set`.
 
-Each email carries a key made from its recipient, subject and text, so a retried job never sends it twice.
-mailroom passes bounces and complaints back to the Worker's `EmailEvents` entrypoint (`worker/main.js`), into the same `email_events` table: a hard bounce or a complaint suppresses the address until it is cleared on the People page.
+## Bounces and complaints
 
-The `EMAIL_VIA` repository variable overrides `[email] via` in the paper workflows, so the transport can be switched without editing the watch list.
+mailroom passes the paper's bounces, complaints, rejections and failures to the live Worker's `EmailEvents` entrypoint (`worker/main.js`), which stores them in D1 (`email_events`).
+A hard bounce or a complaint suppresses that address: `scripts/store.py pull` writes `suppressed.json`, the senders refuse to email it, and the Worker refuses it too.
+The People page lists suppressed addresses and clears one once the address is fixed.
+Cloudflare keeps its own account-wide suppression list as well, and mailroom refuses any address on its own list.
 
-## Amazon SES
+## Cost
 
-`scripts/ses.py` calls the SES v2 `SendEmail` API with Signature Version 4, written with the standard library, so the engine still has no dependencies.
-It reads the usual AWS environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`).
-
-The recommended setup keeps no long-lived AWS keys anywhere:
-
-1. Deploy `paper/aws/ses.yml` with CloudFormation in your sending region.
-   It creates the sender domain identity (Easy DKIM, custom MAIL FROM), your own address as a verified identity, a configuration set, an SNS topic for bounce and complaint events, and the role `pr-post-ses-sender`.
-   The role trusts only GitHub Actions jobs of one repository running in one GitHub environment (`email`), and may only send as one From address.
-2. Add the DNS records from the stack's Outputs: three DKIM CNAMEs, the MAIL FROM MX and TXT records, and a DMARC record for the sender domain.
-   Use a subdomain of its own (such as `post.example.com`) so the records never touch your main domain's mail.
-3. In GitHub, create the environment `email` limited to the `main` branch, and set the repository variable `AWS_SES_ROLE_ARN` to the role's ARN.
-   Jobs that send declare `environment: email` and `permissions: id-token: write`, then run `aws-actions/configure-aws-credentials` with `role-to-assume: ${{ vars.AWS_SES_ROLE_ARN }}` for one-hour credentials.
-4. New SES accounts start in the sandbox, which only delivers to verified addresses.
-   That covers sending to yourself; request production access in the SES console to send to anyone else.
-
-### Bounces and complaints
-
-The configuration set sends Bounce, Complaint, Reject, Delivery and DeliveryDelay events to the SNS topic, which posts them to the Worker's `/api/ses/events`.
-The Worker accepts a message only with a valid SNS signature (SignatureVersion 2), a signing certificate from an `sns.<region>.amazonaws.com` address, and the topic in its `SES_TOPIC_ARN` variable, and it confirms the subscription only through an SNS address (`worker/sns.js`).
-Events are stored in D1 (`email_events`).
-A permanent bounce or a complaint suppresses that address: `scripts/store.py pull` writes `suppressed.json`, and the senders refuse to email a suppressed address.
-SES's own account-level suppression list stays on as well.
-
-After setting `SES_TOPIC_ARN` on a Worker that already runs this code, confirm the subscription once: SNS console, the topic, Subscriptions, select the pending one, **Request confirmation**.
-
-### Cost
-
-SES costs about $0.10 per 1,000 emails, and SNS HTTPS notifications are free for the first 100,000 a month, so a paper that sends a few emails a week costs well under a cent a month.
-
-## Resend
-
-With `via = "resend"` (the default) the emails go through Resend with `RESEND_API_KEY`.
+Cloudflare Email Service on Workers Paid includes 3,000 emails a month for the whole account, then $0.35 per 1,000; mail to your own verified Email Routing address is free.
+A paper that sends a few emails a week is well inside that.
