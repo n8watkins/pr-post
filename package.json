@@ -1,6 +1,6 @@
 {
   "name": "pr-post",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "description": "Follow what your favorite builders ship: a newspaper and a feed.json from their public GitHub and YouTube work.",
   "license": "MIT",
