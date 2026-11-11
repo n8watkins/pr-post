@@ -485,8 +485,9 @@ footer.colophon { max-width: 1120px; margin: 22px auto 0; font-family: var(--mon
 .picks-end h2 { font-family: var(--display); font-weight: 750; font-size: 32px; margin: 0; }
 .picks-end p { margin: 0; color: var(--ink-soft); }
 .picks-cmds { display: grid; gap: 10px; justify-items: center; width: 100%; }
-.picks-cmds pre { width: 100%; margin: 0; text-align: left; overflow-x: auto; background: var(--hover); border-radius: 8px; padding: 12px 14px; }
-.picks-cmds code { background: none; padding: 0; }
+.picks-cmds pre { width: 100%; margin: 0; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--hover); border-radius: 8px; padding: 12px 14px; }
+.picks-cmds code { display: block; background: none; padding: 0; font-size: 14px; line-height: 1.45; }
+.picks-cmds code + code { margin-top: 8px; }
 .pick-card:focus, .picks-end h2:focus { outline: none; }
 .picks-end-mark { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; font-size: 30px; background: var(--accent); color: var(--on-accent); }
 @media (pointer: coarse), (max-width: 600px) { .picks-keys { display: none; } }
@@ -506,7 +507,8 @@ footer.colophon { max-width: 1120px; margin: 22px auto 0; font-family: var(--mon
   .picks > .picks-buttons .btn { min-width: 0; padding-inline: 12px; }
   /* the decision buttons stay in reach while a long card scrolls under them */
   .picks > .picks-buttons { position: sticky; bottom: 0; z-index: 5; gap: 8px; margin-top: -4px; padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 0px)); background: var(--sheet); border-top: 1px solid var(--rule); }
-  .picks-end .picks-buttons { display: grid; width: 100%; }
+  .picks-end .picks-buttons { display: grid; justify-content: stretch; width: 100%; }
+  .picks-cmds .btn { width: 100%; }
 }
 @media (max-width: 374px) {
   .pick-card { padding: 14px; }

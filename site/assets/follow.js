@@ -144,7 +144,7 @@
         <div class="picks-end-mark" aria-hidden="true"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
         <h2 tabindex="-1">That's this week's picks</h2>
         <p class="picks-summary"></p>
-        ${api ? "" : `<div class="picks-cmds" hidden><pre><code></code></pre><button class="btn" type="button" data-copyall>Copy all commands</button></div>`}
+        ${api ? "" : `<div class="picks-cmds" hidden><pre></pre><button class="btn" type="button" data-copyall>Copy all commands</button></div>`}
         <div class="picks-buttons">
           ${api ? `<a class="btn solid" href="${escp(app.dataset.people)}">Review drafts on People</a>` : ""}
           <a class="btn${api ? "" : " solid"}" href="${escp(all)}">See the full list</a>
@@ -209,12 +209,12 @@
         const n = counts(decisions);
         $(".picks-summary", end).textContent = `You added ${n.added} and skipped ${n.skipped}. ` +
           (api ? "Added people wait as drafts on the People page until you approve them."
-            : n.added ? "Run these commands in your paper's folder to draft them as a pull request:" : "");
+            : n.added ? "Run these commands to draft each of them as a pull request:" : "");
         const cmds = $(".picks-cmds", end);
         if (cmds) {
           const list = addedCommands(cards, decisions);
           cmds.hidden = !list.length;
-          $("code", cmds).textContent = list.join("\n");
+          $("pre", cmds).replaceChildren(...list.map((cmd) => Object.assign(document.createElement("code"), { textContent: cmd })));
         }
         unskipBtn.hidden = !n.skipped;
         view.hidden = true;

@@ -821,8 +821,8 @@ def settings_page(people):
 <div class="sect">Follow someone new</div>
 <form class="add-form" id="add-form" autocomplete="off">
   <label>GitHub username<input name="github" id="add-github" required placeholder="e.g. octocat"></label>
-  <label>What you call them<input name="name" id="add-name" placeholder="e.g. Simon Willison"></label>
-  <label class="wide">Orgs where their work lands (optional, comma separated)<input name="orgs" id="add-orgs" placeholder="e.g. datasette"></label>
+  <label>What you call them<input name="name" id="add-name" placeholder="e.g. Mona Octocat"></label>
+  <label class="wide">Orgs where their work lands (optional, comma separated)<input name="orgs" id="add-orgs" placeholder="e.g. octo-org"></label>
   <label class="wide">Known for (optional)<input name="known_for" id="add-known" placeholder="One line on who they are"></label>
   <div class="wide"><button class="btn" type="submit">Add to the list</button></div>
 </form>
