@@ -7,15 +7,15 @@ Values never go in this repository or in a chat: secrets go through `pass-env` (
 
 | Name | Kind | Where | Set by |
 | --- | --- | --- | --- |
-| `SITE_PASSWORD` | Secret | Worker | Already set; removed once Cloudflare Access is on |
-| `JOBS_TOKEN` | Secret | Worker and Actions | Agent (`pass-env generate pr-post/JOBS_TOKEN`) |
+| `SITE_PASSWORD` | Secret | Both Workers, from `pr-post/SITE_PASSWORD` in pass (the owner reads it with `pass`) | Agent; removed once Cloudflare Access is on |
+| `JOBS_TOKEN` | Secret | Both Workers and Actions | Agent (`pass-env generate pr-post/JOBS_TOKEN`) |
 | `WRITER_TOKEN` | Secret | Worker, and the routine's environment as `PR_POST_WRITER_TOKEN` | Agent generates; the routine's copy is pasted by the owner |
 | `ACTION_SIGNING_KEY` | Secret | Worker and Actions | Agent |
 | `ACTIONS_TOKEN` | Secret | Worker | Owner (step C2) |
 | `FOLLOW_GITHUB_TOKEN` | Secret | Actions | Owner (step C1) |
 | `CLOUDFLARE_API_TOKEN` | Secret | Actions | Owner, optional (step C3) |
-| `PR_POST_API` | Secret (so run logs mask it) | Actions, and the routine's environment | The Worker's address |
-| `PAPER_DEPLOY_LIVE` | Variable | Actions | `true` once the live Worker runs this code |
+| `PR_POST_API` | Secret (so run logs mask it), never a variable | Actions, and the routine's environment | The live Worker's address (the staging Worker's only while testing a job) |
+| `PAPER_DEPLOY_LIVE` | Variable | Actions | `true` (the live Worker runs this code since 2026-11-11) |
 
 Email needs no secret: the jobs hand each email to the Worker with `JOBS_TOKEN`, and the Worker sends it through its `MAILROOM` service binding to [mailroom](https://github.com/n8watkins/mailroom), from `prpost@n8builds.dev` ([docs/email.md](../docs/email.md)).
 Bounces and complaints come back to the live Worker's `EmailEvents` entrypoint and show on the People page.
