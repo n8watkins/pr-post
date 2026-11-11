@@ -89,6 +89,158 @@
     });
   });
 
+  // ----- this week's picks, one card at a time (PREVIEW) -----
+  const picksApp = $("#picks-app");
+  if (picksApp) picksPage(picksApp);
+
+  function picksPage(app) {
+    const escp = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const fmt = (x) => Number(x || 0).toLocaleString();
+    const { week, cards } = JSON.parse($("#picks-data").textContent);
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const key = `pr-post-picks-${week}`;
+    // Decisions survive a reload for this week only; the paper itself is the record.
+    let done = {};
+    try { done = JSON.parse(localStorage.getItem(key) || "{}"); } catch { done = {}; }
+    const save = () => { try { localStorage.setItem(key, JSON.stringify(done)); } catch { /* private window: decisions last until reload */ } };
+    let stubbed = false;
+    let busy = false;
+    let last = { kind: "", text: "" }; // the latest status line, kept across re-renders
+
+    const remaining = () => cards.filter((c) => !done[c.login]);
+    const position = () => cards.length - remaining().length + 1;
+
+    async function add(c) {
+      try {
+        const res = await fetch(app.dataset.api, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ github: c.login }) });
+        if ([404, 405, 501].includes(res.status)) { stubbed = true; return { kind: "stub", text: `Preview: nothing was saved for @${c.login}.` }; }
+        const out = await res.json().catch(() => ({}));
+        if (res.status === 409) return { kind: "ok", text: `@${c.login} is already on the paper.` };
+        if (!res.ok) return { kind: "err", text: out.error || `Could not add @${c.login} (${res.status}).` };
+        return { kind: "ok", text: `Researching @${c.login}. Their draft waits on the People page.` };
+      } catch {
+        return { kind: "err", text: `Could not reach the paper. @${c.login} was not added.` };
+      }
+    }
+
+    function toast(r) {
+      const t = $("#picks-toast", app);
+      last = r;
+      if (!t) return;
+      t.className = `picks-toast ${r.kind}`;
+      t.textContent = r.text;
+    }
+
+    function decide(dir) {
+      const c = remaining()[0];
+      if (!c || busy) return;
+      busy = true;
+      const card = $(".pick-card", app);
+      done[c.login] = dir === "add" ? "added" : "skipped";
+      save();
+      if (dir === "add") add(c).then((r) => {
+        if (r.kind === "err") { delete done[c.login]; save(); render(); }
+        if (r.kind === "stub") $(".picks-stub", app)?.removeAttribute("hidden");
+        toast(r);
+      });
+      else toast({ kind: "", text: `Skipped @${c.login}.` });
+      const go = () => { busy = false; render(); };
+      if (reduce || !card) { go(); return; }
+      card.style.transition = "transform .22s ease-in, opacity .22s ease-in";
+      card.style.transform = `translateX(${dir === "add" ? 120 : -120}%) rotate(${dir === "add" ? 10 : -10}deg)`;
+      card.style.opacity = "0";
+      setTimeout(go, 220);
+    }
+
+    function undo() {
+      const prev = Object.keys(done).pop();
+      if (!prev || busy) return;
+      const was = done[prev];
+      delete done[prev];
+      save();
+      toast({ kind: "", text: was === "added" ? `Back to @${prev}. A draft already requested stays on the People page.` : `Back to @${prev}.` });
+      render();
+    }
+
+    function cardHtml(c) {
+      const avatar = c.avatar ? `<img class="pick-avatar" src="${escp(c.avatar)}" alt="" width="96" height="96">` : `<span class="pick-avatar pick-initial" aria-hidden="true">${escp(c.name[0])}</span>`;
+      const top = c.top && c.top.repo ? `<div><b>${escp(c.top.repo.split("/").pop())}</b><span>top repo · ${fmt(c.top.stars)} stars</span></div>` : "";
+      return `<article class="pick-card" tabindex="-1" aria-label="${escp(c.name)}, fit ${c.score}">
+        <div class="pick-top">${avatar}<div class="pick-id"><h2>${escp(c.name)}</h2><div class="pick-login">@${escp(c.login)}</div></div>
+          <div class="pick-score pick-${escp(c.rec.toLowerCase())}"><b>${c.score}</b><span>${escp(c.rec)}</span></div></div>
+        <p class="pick-why">${escp(c.why)}</p>
+        <div class="pick-nums"><div><b>${fmt(c.active)}</b><span>contributions in 12 weeks</span></div>
+          <div><b>${fmt(c.stars)}</b><span>stars on their repos</span></div><div><b>${fmt(c.followers)}</b><span>followers</span></div>${top}</div>
+        <a class="pick-more" href="${escp(app.dataset.all)}#${escp(c.login.toLowerCase())}">Full mini report</a>
+      </article>`;
+    }
+
+    function render() {
+      const left = remaining();
+      const counts = Object.values(done).reduce((a, v) => ({ ...a, [v]: (a[v] || 0) + 1 }), {});
+      const note = `<p class="picks-stub" ${stubbed ? "" : "hidden"}>Preview build: Add is not connected here, so nothing is saved.</p>`;
+      if (!left.length) {
+        if (last.kind !== "err") last = { kind: "", text: "" }; // the summary says it all
+        app.innerHTML = `<div class="picks-end"><div class="picks-end-mark" aria-hidden="true">✓</div><h2>That's this week's picks</h2>
+          <p>You added ${counts.added || 0} and skipped ${counts.skipped || 0}. Added people wait as drafts on the People page until you approve them.</p>
+          <div class="picks-buttons"><a class="btn solid" href="${escp(app.dataset.people)}">Review drafts</a><a class="btn" href="${escp(app.dataset.all)}">See the full list</a><button class="btn" type="button" data-restart>Start over</button></div>
+          ${note}<p class="picks-toast ${last.kind}" id="picks-toast" role="status">${escp(last.text)}</p></div>`;
+        $("[data-restart]", app).addEventListener("click", () => { done = {}; save(); render(); });
+        return;
+      }
+      const c = left[0];
+      app.innerHTML = `<div class="picks">
+        <div class="picks-progress"><span>${position()} of ${cards.length}</span><span class="picks-bar" aria-hidden="true"><span style="width:${100 * (position() - 1) / cards.length}%"></span></span>
+          <button class="btn sm" type="button" data-undo ${Object.keys(done).length ? "" : "disabled"}>Back</button></div>
+        <div class="pick-stack">${left[1] ? `<div class="pick-under" aria-hidden="true"></div>` : ""}${cardHtml(c)}</div>
+        <div class="picks-buttons">
+          <button class="btn pick-skip" type="button" data-skip aria-keyshortcuts="ArrowLeft">Skip</button>
+          <a class="btn" href="${escp(c.profile)}" target="_blank" rel="noopener" aria-keyshortcuts="o">Open GitHub</a>
+          <button class="btn solid pick-add" type="button" data-add aria-keyshortcuts="ArrowRight">Add to PR Post</button>
+        </div>
+        ${note}<p class="picks-toast ${last.kind}" id="picks-toast" role="status">${escp(last.text)}</p></div>`;
+      $("[data-skip]", app).addEventListener("click", () => decide("skip"));
+      $("[data-add]", app).addEventListener("click", () => decide("add"));
+      $("[data-undo]", app).addEventListener("click", undo);
+      swipe($(".pick-card", app));
+    }
+
+    // Touch and mouse: drag the card past a third of its width to decide.
+    function swipe(card) {
+      let x0 = null, dx = 0;
+      card.addEventListener("pointerdown", (e) => {
+        if (e.target.closest("a, button")) return;
+        x0 = e.clientX; dx = 0; card.setPointerCapture(e.pointerId); card.style.transition = "none";
+      });
+      card.addEventListener("pointermove", (e) => {
+        if (x0 === null) return;
+        dx = e.clientX - x0;
+        if (!reduce) card.style.transform = `translateX(${dx}px) rotate(${dx / 30}deg)`;
+        card.dataset.lean = dx > 40 ? "add" : dx < -40 ? "skip" : "";
+      });
+      const end = () => {
+        if (x0 === null) return;
+        x0 = null;
+        const far = Math.abs(dx) > card.offsetWidth / 3;
+        if (far) { decide(dx > 0 ? "add" : "skip"); return; }
+        card.style.transition = reduce ? "none" : "transform .18s ease-out";
+        card.style.transform = "";
+        card.dataset.lean = "";
+      };
+      card.addEventListener("pointerup", end);
+      card.addEventListener("pointercancel", end);
+    }
+
+    document.addEventListener("keydown", (e) => {
+      if (e.target.closest("input, textarea, select") || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "ArrowRight") { e.preventDefault(); decide("add"); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); decide("skip"); }
+      else if (e.key === "o" || e.key === "O") { const c = remaining()[0]; if (c) window.open(c.profile, "_blank", "noopener"); }
+      else if (e.key === "Backspace" || e.key === "z") undo();
+    });
+    render();
+  }
+
   // ----- people (a paper kept in Cloudflare: the Worker's /api/people) -----
   const peopleApp = $("#people-app");
   if (peopleApp) peoplePage(peopleApp);

@@ -29,8 +29,10 @@ import follow_lib  # noqa: E402
 from md import blocks, safe_url  # noqa: E402
 
 ROOT = config.ROOT
-FONTS = ("https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,800;6..96,900"
-         "&family=Newsreader:opsz,wght@6..72,400;6..72,600&family=JetBrains+Mono:wght@500;700&display=swap")
+# Bodoni only sets the masthead and wordmark; Source Serif 4 sets headlines, Inter the text and UI.
+FONTS = ("https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,900"
+         "&family=Source+Serif+4:opsz,wght@8..60,600..800&family=Inter:opsz,wght@14..32,400..700"
+         "&family=JetBrains+Mono:wght@500&display=swap")
 ARROW_MIN_DAYS = 4  # compare against a snapshot at least this old
 FACTS_SIDE_MAX = 6  # births and obituaries the facts edition prints before "plus N more"
 REPO_URL = "https://github.com/n8watkins/pr-post"
@@ -692,7 +694,7 @@ def person_page(p, st, reports, profile, people, editions, summary, facts):
         stem, md = reports[0]
         kind = "Weekly report" if stem.endswith("weekly") else "Midweek update"
         week_html = f"""<div class="sect">This week</div>
-<div class="report-meta label"><span>{kind} · {day_short(stem[:10])}</span><span><a href="{u("/r/" + esc(stem) + "/")}">Whole issue</a> · <a href="{u("/p/" + esc(pid) + "/" + esc(stem) + "/")}">Permalink</a></span></div>
+<div class="report-meta label"><span>{kind} · {day_short(stem[:10])}</span><span class="report-actions"><a class="btn sm" href="{u("/r/" + esc(stem) + "/")}">Whole issue</a><a class="btn sm" href="{u("/p/" + esc(pid) + "/" + esc(stem) + "/")}">Permalink</a></span></div>
 <div class="prose">{render_md(md, demote=1)}</div>"""
     elif st["recent"]:
         week_html = f'<div class="sect">This week, from the record</div>{recent_list(st["recent"])}'
@@ -855,11 +857,11 @@ def follow_card(c, report, repo_url):
     add_href = follow_lib.add_url(repo_url)
     add_link = f' or {ext(add_href, "run it from GitHub")} with their username' if add_href else ""
     return f"""<article class="fcard" id="{esc(login.lower())}">
-  <div class="fc-head">{avatar_html}<div class="fc-id"><h2 class="fc-name">{ext(c["profile"], esc(c["name"]))}</h2><div class="label">@{esc(login)} · researched {day_short(c["researched"])}</div></div>
+  <div class="fc-head">{avatar_html}<div class="fc-id"><h2 class="fc-name">{esc(c["name"])}</h2><div class="label">@{esc(login)} · researched {day_short(c["researched"])}</div></div>
   <div class="fc-score fc-{esc(rec)}" title="Fit score out of 100"><b class="num">{c["score"]}</b><span>{esc(c["recommendation"])}</span></div></div>
   <p class="fc-why">{esc(c["why_follow"])}</p>
   <div class="fc-parts">{parts}</div>
-  <div class="fc-actions">{ext(c["profile"], "Follow on GitHub", "btn solid")}<button class="btn" type="button" data-copy="{esc(cmd)}">Add to PR Post</button><span class="fc-copied label" role="status"></span></div>
+  <div class="fc-actions"><button class="btn solid" type="button" data-copy="{esc(cmd)}">Add to PR Post</button>{ext(c["profile"], "Open GitHub profile", "btn")}<span class="fc-copied label" role="status"></span></div>
   <details class="fc-report"><summary>Mini report</summary>
     <div class="prose">{render_md(follow_lib.render_md(report), demote=1)}</div>
     {f'<div class="sect">How they turned up</div><ul class="fc-found">{found}</ul>' if found else ""}
@@ -887,12 +889,43 @@ def follow_page(latest, reports, repo_url):
     return f"""<div class="runhead"><span>{esc(PAPER)} · Who to follow</span><span>Updated {day_short(latest["date"])}</span></div>
 <h1 class="page-hed">Who to follow</h1>
 <p class="page-sub">Builders you do not follow yet, found through the people you read, the repos you build on and projects like yours. Each has a one-time mini report from public sources; every fact links to where it came from.</p>
+<p class="picks-cta"><a class="btn solid" href="{u("/follow/picks/")}">Swipe through this week's picks</a></p>
 {toc_html}
 <div class="sect">This week's picks</div>
 <div class="fgrid">{picks_html}</div>
 {rest_html}
 {skip_html}
 <p class="facts-note">The fit score adds up five parts: how much of your stack they use ({esc(stack)}), how active they have been over 12 weeks, the quality and reach of their work, how many of your interests their work touches, and whether the builders you already read follow or work with them. Weights and thresholds live under [follow] in watchlist.toml. Nothing here follows anyone for you: Follow on GitHub only opens their profile.</p>"""
+
+
+def follow_picks_page(latest, reports):
+    """This week's picks one card at a time (PREVIEW): app.js deals the cards from the JSON below.
+
+    Add calls the People page's draft endpoint (POST /api/people/drafts), the same path as
+    "Research and draft them"; a static preview without the Worker shows that it saved nothing.
+    """
+    by_login = {c["login"]: c for c in latest["candidates"]}
+    order = [by_login[x] for x in latest.get("picks", []) if x in by_login]
+    order += [c for c in latest["candidates"] if c not in order and c["recommendation"] != "Skip"]
+    cards = []
+    for c in order:
+        r = reports[c["login"].lower()]
+        top = max(r.get("builds") or [{}], key=lambda b: b.get("stars", 0))
+        avatar = c.get("avatar") or r.get("avatar")
+        cards.append({
+            "login": c["login"], "name": c["name"], "profile": safe_url(c["profile"]),
+            "avatar": safe_url(avatar) if avatar and config.is_http_url(avatar) else "",
+            "score": c["score"], "rec": c["recommendation"], "why": c["why_follow"],
+            "stars": r["standing"]["stars"], "followers": r["standing"]["followers"],
+            "active": r["activity"]["last_12w"], "trend": r["activity"]["trend"],
+            "top": {"repo": top.get("repo", ""), "stars": top.get("stars", 0)} if top else None,
+        })
+    data = json.dumps({"week": latest["date"], "cards": cards}, ensure_ascii=False).replace("</", "<\\/")
+    return f"""<div class="runhead"><span>{esc(PAPER)} · <a href="{u("/follow/")}">Who to follow</a></span><span>Week of {day_short(latest["date"])}</span></div>
+<h1 class="page-hed">This week's picks</h1>
+<p class="page-sub picks-sub">One at a time: open their GitHub, then add them to the paper or skip. <span class="picks-keys">Keys: right arrow adds, left arrow skips, O opens GitHub.</span></p>
+<div id="picks-app" data-api="/api/people/drafts" data-people="{u("/people/")}" data-all="{u("/follow/")}" aria-live="polite"><noscript><p class="muted">This page needs JavaScript; <a href="{u("/follow/")}">the full list</a> works without it.</p></noscript></div>
+<script type="application/json" id="picks-data">{data}</script>"""
 
 
 # ---------- build ----------
@@ -951,11 +984,13 @@ def build(paper, out):
     if HAS_FOLLOW:
         write("follow/index.html", layout(f"Who to follow · {PAPER}", sheet(follow_page(follow_latest, follow_reports, cfg["links"].get("repo"))),
                                           order, snaps, page="follow", description=f"Who to follow: builders suggested for {PAPER}."))
+        write("follow/picks/index.html", layout(f"This week's picks · {PAPER}", sheet(follow_picks_page(follow_latest, follow_reports)),
+                                                order, snaps, page="follow", description=f"This week's picks for {PAPER}, one at a time."))
     if SITE["mode"] == "private" and SITE["storage"] == "cloudflare":
         write("people/index.html", layout(f"People · {PAPER}", sheet(people_page()), order, snaps, page="people"))
     elif SITE["mode"] == "private":
         write("settings/index.html", layout(f"People and settings · {PAPER}", sheet(settings_page(people)), order, snaps, page="settings"))
-    write("404.html", layout(f"Not found · {PAPER}", sheet(f'<h1 class="page-hed">Page not found</h1><p class="page-sub"><a href="{u("/")}">Back to the front page</a></p>'), order, snaps))
+    write("404.html", layout(f"Not found · {PAPER}", sheet(f'<h1 class="page-hed">Page not found</h1><p class="page-sub">That page is not in this paper.</p><p><a class="btn solid" href="{u("/")}">Back to the front page</a></p>'), order, snaps))
 
     feed = None
     if snaps:
