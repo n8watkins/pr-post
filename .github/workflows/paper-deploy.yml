@@ -1,9 +1,8 @@
 # The owner's paper: deploy the Worker (worker/, paper/wrangler.jsonc) and
 # apply new D1 migrations when they change on main. Content never needs a
 # deploy: the Worker serves the site from R2. Skips with a notice until the
-# CLOUDFLARE_API_TOKEN secret exists (paper/SETUP.md); the staging Worker is
-# always deployed, the live one only when the repository variable
-# PAPER_DEPLOY_LIVE is "true".
+# CLOUDFLARE_API_TOKEN secret exists (paper/SETUP.md); the live Worker deploys
+# only when the repository variable PAPER_DEPLOY_LIVE is "true".
 name: "Paper: deploy"
 
 on:
@@ -39,9 +38,6 @@ jobs:
       - name: Migrate D1
         if: env.CLOUDFLARE_API_TOKEN != ''
         run: npx --yes wrangler@4.151.3 d1 migrations apply pr-post -c paper/wrangler.jsonc --remote
-      - name: Deploy staging
-        if: env.CLOUDFLARE_API_TOKEN != ''
-        run: npx --yes wrangler@4.151.3 deploy -c paper/wrangler.jsonc --env staging
       - name: Deploy the live paper
         if: env.CLOUDFLARE_API_TOKEN != '' && vars.PAPER_DEPLOY_LIVE == 'true'
         run: npx --yes wrangler@4.151.3 deploy -c paper/wrangler.jsonc

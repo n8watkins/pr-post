@@ -7,10 +7,9 @@
   //
   // Deploy from the repository root:
   //   npx wrangler@4.151.3 deploy -c paper/wrangler.jsonc               # the live paper
-  //   npx wrangler@4.151.3 deploy -c paper/wrangler.jsonc --env staging # pull-request-post-next
   //   npx wrangler@4.151.3 d1 migrations apply pr-post -c paper/wrangler.jsonc --remote
-  // Secrets (set with `wrangler secret put`, never here): SITE_PASSWORD,
-  // JOBS_TOKEN, WRITER_TOKEN, ACTION_SIGNING_KEY, ACTIONS_TOKEN, ALLOWED_EMAILS.
+  // Secrets (set with `wrangler secret put`, never here): SITE_PASSWORD (only
+  // until Cloudflare Access is on), JOBS_TOKEN, WRITER_TOKEN, ACTION_SIGNING_KEY, ACTIONS_TOKEN, ALLOWED_EMAILS.
   "$schema": "../node_modules/wrangler/config-schema.json",
   "name": "pull-request-post",
   "account_id": "b2c564cf83cb9184dd6d7cc4ff8b38bf",
@@ -41,30 +40,5 @@
   // The clock for the paper's GitHub Actions jobs (worker/jobs.js): collect on
   // Wednesdays and Saturdays at 11:00 UTC, publish as a backstop after the
   // writer's 16:00 run. Add "0 10 * * 6" to start Who to follow on Saturdays.
-  "triggers": { "crons": ["0 11 * * 3,6", "30 17,20 * * 3,6"] },
-  "env": {
-    // A second Worker on the same storage that serves the site from site-next/,
-    // for checking a change end to end before the live paper gets it.
-    "staging": {
-      "name": "pull-request-post-next",
-      "workers_dev": true,
-      "vars": {
-        "SITE_TITLE": "The Pull Request Post (staging)",
-        "SITE_PREFIX": "site-next/",
-        "GITHUB_REPO": "n8watkins/pr-post",
-        "ACCESS_TEAM_DOMAIN": "",
-        "ACCESS_AUD": "",
-        "EMAIL_FROM_NAME": "The Pull Request Post"
-      },
-      "d1_databases": [
-        { "binding": "DB", "database_name": "pr-post", "database_id": "2b4ca910-88b0-494b-a51d-a0c6da9a8869", "migrations_dir": "migrations" }
-      ],
-      "r2_buckets": [{ "binding": "STORE", "bucket_name": "pr-post-paper" }],
-      // Point a job's PR_POST_API here to test it end to end: it then sends that
-      // job's email too, as the same mailroom app; bounces still go to the live Worker.
-      "services": [{ "binding": "MAILROOM", "service": "mailroom", "entrypoint": "Mailroom", "props": { "app": "prpost" } }],
-      "observability": { "enabled": true },
-      "triggers": { "crons": [] }
-    }
-  }
+  "triggers": { "crons": ["0 11 * * 3,6", "30 17,20 * * 3,6"] }
 }
