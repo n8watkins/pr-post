@@ -1,5 +1,5 @@
-// pr-post: sidebar drawer, people filter, keyboard shortcuts
-// and the settings editor. No dependencies.
+// pr-post: sidebar drawer, people filter, keyboard shortcuts, the undo toast,
+// the People page and the settings editor. No dependencies.
 (() => {
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -14,7 +14,7 @@
     };
     toggle.addEventListener("click", () => setOpen(!document.body.classList.contains("rail-open")));
     document.addEventListener("click", (e) => {
-      if (document.body.classList.contains("rail-open") && !e.target.closest(".rail") && e.target !== toggle) setOpen(false);
+      if (document.body.classList.contains("rail-open") && !e.target.closest(".rail") && !toggle.contains(e.target)) setOpen(false);
     });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") setOpen(false); });
   }
@@ -74,19 +74,57 @@
   openTarget();
   window.addEventListener("hashchange", openTarget);
 
-  // ----- who to follow: "Add to PR Post" copies the one-liner that drafts the entry -----
-  $$("[data-copy]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const note = btn.parentElement.querySelector(".fc-copied");
-      try {
-        await navigator.clipboard.writeText(btn.dataset.copy);
-        if (note) note.textContent = "Command copied. Run it to draft a pull request.";
-      } catch {
-        const details = btn.closest(".fcard")?.querySelector(".fc-report");
-        if (details) details.open = true;
-        if (note) note.textContent = "Copy the command from the mini report.";
-      }
-    });
+  // ----- toast: one at a time, with an optional Undo (also Ctrl/Cmd+Z while it shows) -----
+  let toastTimer = null;
+  let toastUndo = null;
+  // The live region is in the page before its first message, so screen readers announce it.
+  const toastEl = (() => {
+    if (!$("#people-app, #set-list")) return null;
+    const el = document.createElement("div");
+    el.id = "toast";
+    el.className = "toast";
+    el.setAttribute("role", "status");
+    el.hidden = true;
+    document.body.appendChild(el);
+    return el;
+  })();
+  function toast(text, { undo = null, kind = "" } = {}) {
+    const el = toastEl;
+    if (!el) return;
+    clearTimeout(toastTimer);
+    toastUndo = undo;
+    el.className = `toast ${kind}`;
+    el.innerHTML = '<span class="toast-text"></span>';
+    $(".toast-text", el).textContent = text;
+    if (undo) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn sm";
+      b.textContent = "Undo";
+      b.setAttribute("aria-keyshortcuts", "Control+Z Meta+Z");
+      b.addEventListener("click", () => runUndo());
+      el.appendChild(b);
+    }
+    el.hidden = false;
+    toastTimer = setTimeout(hideToast, undo ? 6000 : 4000);
+  }
+  function hideToast() {
+    clearTimeout(toastTimer);
+    const el = $("#toast");
+    if (el) el.hidden = true;
+    const u = toastUndo;
+    toastUndo = null;
+    return u;
+  }
+  function runUndo() {
+    const u = hideToast();
+    if (u) u();
+  }
+  document.addEventListener("keydown", (e) => {
+    if (toastUndo && (e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !e.target.closest("input, textarea, select")) {
+      e.preventDefault();
+      runUndo();
+    }
   });
 
   // ----- people (a paper kept in Cloudflare: the Worker's /api/people) -----
@@ -98,8 +136,8 @@
     let data = { people: [], suppressed: [], changes: [] };
     const open = new Set(); // ids whose edit form is open
 
-    async function api(method, path, body) {
-      const res = await fetch(path, { method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
+    async function api(method, path, body, extra = {}) {
+      const res = await fetch(path, { method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined, ...extra });
       const out = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(out.error || `That didn't work (${res.status}).`);
       return out;
@@ -132,20 +170,41 @@
       return bits.join(" · ");
     };
 
-    function confirmButton(label, onConfirm) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "btn danger";
-      b.textContent = label;
-      b.addEventListener("click", () => {
-        if (b.dataset.confirm) { onConfirm(); return; }
-        b.dataset.confirm = "1";
-        b.textContent = "Confirm " + label.toLowerCase();
-        b.classList.add("solid");
-        setTimeout(() => { if (b.isConnected) { delete b.dataset.confirm; b.textContent = label; b.classList.remove("solid"); } }, 4000);
-      });
-      return b;
+    // Remove and Discard happen at once with an Undo toast; the DELETE is sent when the
+    // toast runs out, when another removal starts, or when the page is left.
+    let pending = null; // { id, name, timer }
+    async function commitRemoval(leaving = false) {
+      if (!pending) return;
+      const { id, name, timer } = pending;
+      clearTimeout(timer);
+      pending = null;
+      try {
+        await api("DELETE", `/api/people/${id}`, undefined, { keepalive: leaving });
+        if (!leaving) await load();
+      } catch (err) {
+        if (leaving) return;
+        await load();
+        flash(`Could not remove ${name}, so they are still here. ${err.message}`, "err");
+      }
     }
+    function remove(p) {
+      commitRemoval();
+      const verb = p.status === "draft" ? "Discarded" : "Removed";
+      const id = p.id;
+      const name = p.entry.name;
+      pending = { id, name, timer: setTimeout(() => commitRemoval(), 6000) };
+      render();
+      toast(`${verb} ${name}.`, {
+        undo: () => {
+          if (!pending || pending.id !== id) return;
+          clearTimeout(pending.timer);
+          pending = null;
+          render();
+          flash(`${name} is back.`, "ok");
+        },
+      });
+    }
+    window.addEventListener("pagehide", () => commitRemoval(true));
 
     function button(label, onClick, extra = "") {
       const b = document.createElement("button");
@@ -200,8 +259,14 @@
       $(".star-btn", li).addEventListener("click", () =>
         act(() => api("PUT", `/api/people/${p.id}`, { entry: { ...e, starred: !e.starred } }), `${e.starred ? "Unstarred" : "Starred"} ${e.name}.`));
       if (p.status === "active") {
-        const ids = list.map((x) => x.id);
-        const move = (d) => { const j = i + d; [ids[i], ids[j]] = [ids[j], ids[i]]; act(() => api("PUT", "/api/people/order", { ids }), "Order saved."); };
+        // Every active id, including someone removed a moment ago and still undoable.
+        const move = (d) => {
+          const ids = data.people.filter((x) => x.status === "active").map((x) => x.id);
+          const a = ids.indexOf(p.id);
+          const b = ids.indexOf(list[i + d].id);
+          [ids[a], ids[b]] = [ids[b], ids[a]];
+          act(() => api("PUT", "/api/people/order", { ids }), "Order saved.");
+        };
         const up = button("↑", () => move(-1), "icon"); up.disabled = i === 0; up.setAttribute("aria-label", `Move ${e.name} up`);
         const down = button("↓", () => move(1), "icon"); down.disabled = i === list.length - 1; down.setAttribute("aria-label", `Move ${e.name} down`);
         actions.append(up, down);
@@ -212,7 +277,7 @@
       actions.append(button(open.has(p.id) ? "Close" : "Edit", () => { open.has(p.id) ? open.delete(p.id) : open.add(p.id); render(); }));
       if (p.status === "active") actions.append(button("Pause", () => act(() => api("POST", `/api/people/${p.id}/status`, { status: "paused" }), `Paused ${e.name}.`)));
       if (p.status === "paused") actions.append(button("Resume", () => act(() => api("POST", `/api/people/${p.id}/status`, { status: "active" }), `Resumed ${e.name}.`)));
-      actions.append(confirmButton(p.status === "draft" ? "Discard" : "Remove", () => act(() => api("DELETE", `/api/people/${p.id}`), `${p.status === "draft" ? "Discarded" : "Removed"} ${e.name}.`)));
+      actions.append(button(p.status === "draft" ? "Discard" : "Remove", () => remove(p), "danger"));
       if (p.note || p.profile) {
         const d = document.createElement("details");
         d.className = "people-more";
@@ -245,7 +310,7 @@
     }
 
     function render() {
-      const by = (s) => data.people.filter((p) => p.status === s);
+      const by = (s) => data.people.filter((p) => p.status === s && p.id !== pending?.id);
       const drafts = by("draft");
       app.innerHTML = `<p class="status" id="people-status" role="status"></p>`;
       if (drafts.length) app.appendChild(section("Drafts waiting for you", drafts, ""));
@@ -333,13 +398,19 @@
         </div>`;
       $(".star-btn", li).addEventListener("click", () => { p.starred = !p.starred; markDirty(); render(); });
       $$("[data-move]", li).forEach((b) => b.addEventListener("click", () => move(i, i + Number(b.dataset.move))));
-      $("[data-remove]", li).addEventListener("click", (e) => {
-        const b = e.currentTarget;
-        if (b.dataset.confirm) { people.splice(i, 1); markDirty(); render(); return; }
-        b.dataset.confirm = "1";
-        b.textContent = "Confirm remove";
-        b.classList.add("solid");
-        setTimeout(() => { if (b.isConnected) { delete b.dataset.confirm; b.textContent = "Remove"; b.classList.remove("solid"); } }, 4000);
+      $("[data-remove]", li).addEventListener("click", () => {
+        const [gone] = people.splice(i, 1);
+        const next = people[i]; // put them back before whoever followed them, wherever that is now
+        markDirty();
+        render();
+        toast(`Removed ${gone.name}. Save changes to keep it.`, {
+          undo: () => {
+            const at = next ? people.indexOf(next) : -1;
+            people.splice(at < 0 ? people.length : at, 0, gone);
+            markDirty();
+            render();
+          },
+        });
       });
       li.addEventListener("dragstart", () => { dragIndex = i; li.classList.add("dragging"); });
       li.addEventListener("dragend", () => { li.classList.remove("dragging"); $$(".drop-before").forEach((x) => x.classList.remove("drop-before")); });

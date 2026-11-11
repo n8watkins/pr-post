@@ -1,7 +1,8 @@
 # Who to follow
 
 An optional feature for a private paper: every week it suggests builders you do not follow yet, with a one-time mini report on each and a fit score from 0 to 100.
-It never follows, stars or changes anything on your account; "Follow on GitHub" only opens their profile.
+The site never follows, stars or changes anything on your GitHub account: "Open GitHub profile" only opens their profile.
+Following from the email is a separate opt-in, described under [One-click Follow and Add from the email](#one-click-follow-and-add-from-the-email).
 
 ## Turning it on
 
@@ -103,11 +104,14 @@ It writes `follow/latest.json` (scores, breakdowns and picks) and `follow/state.
 
 - **Web edition:** a "Who to follow" page lists the picks, then the other Follow and Maybe candidates, then the Skips, each with its breakdown and mini report.
   It is built only in private mode, because it names people you do not follow yet; set `public_page = true` to build it on a public site too.
+- **One at a time:** "Swipe through this week's picks" (`/follow/picks/`) deals the picks and then the Maybes as cards, one per screen, with Skip and Add to PR Post (swipe left or right on a phone; the left and right arrow keys, O for their profile and Z to go back on a keyboard).
+  Skip means "not this week": decisions are kept in that browser for the week of the run and start fresh with the next one, and nothing about them leaves the browser.
 - **Email:** a separate, short "Who to follow" email (`send_follow.py`) with the top five picks: avatar, name, score with Follow or Maybe, one line on why, their GitHub profile and a "Full report" link to their card on the page.
   It is off until you set `email = true` under `[follow]`; run it after `follow.py` (the private paper runs it from a workflow that follows the Who to follow run).
   It only sends picks from a run in the last eight days, and `--dry-run` and `--preview` work as for the digest.
-- **Add to PR Post:** `follow.py --paper . draft <login>` adds their watch-list entry before your own and writes `profiles/<id>.md` from `research_person.py`, for a pull request you review.
-  The page copies a one-liner that runs it in a `follow-add.yml` workflow, when the paper has one and `[links] repo` is set.
+- **Add to PR Post:** on a paper kept in Cloudflare (`storage = "cloudflare"`), the button posts to `/api/people/drafts`, the same request as "Research and draft them" on the People page: the person is researched and waits there as a draft until you approve them.
+  The button says whether that worked, and why not when it did not.
+  On a paper kept in git, `follow.py --paper . draft <login>` adds their watch-list entry before your own and writes `profiles/<id>.md` from `research_person.py`, for a pull request you review; the button copies a one-liner that runs it in a `follow-add.yml` workflow, when the paper has one and `[links] repo` is set, and the end of the picks deck lists every command you copied.
 
 ## One-click Follow and Add from the email
 

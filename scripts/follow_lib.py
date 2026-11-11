@@ -381,7 +381,7 @@ def _cap(x):
 
 
 def score(report, signals, mine, follow_cfg, names=None, pulse=None):
-    """The fit score: {score, recommendation, parts: {name: {points, max, why}}, why_follow}.
+    """The fit score: {score, recommendation, parts: {name: {points, max, why}}, now: {last_12w, followers}, why_follow}.
 
     report:  a mini report; pulse (optional) refreshes its followers and weekly activity.
     signals: how discovery found them (followed_by, collab, stack, similar).
@@ -446,6 +446,7 @@ def score(report, signals, mine, follow_cfg, names=None, pulse=None):
     th = follow_cfg["thresholds"]
     rec = "Follow" if total >= th["follow"] else "Maybe" if total >= th["maybe"] else "Skip"
     return {"score": total, "recommendation": rec, "parts": out_parts,
+            "now": {"last_12w": act["last_12w"], "followers": followers},  # the numbers the score used, fresher than the report
             "why_follow": why_follow(report, shared, matched, fb, collab_with, stack_commits, names)}
 
 
