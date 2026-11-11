@@ -54,7 +54,14 @@ test("addedCommands has nothing when Add drafts through the People page", () => 
 
 function memoryStorage(initial = {}) {
   const data = { ...initial };
-  return { data, getItem: (k) => (k in data ? data[k] : null), setItem: (k, v) => { data[k] = String(v); } };
+  return {
+    data,
+    get length() { return Object.keys(data).length; },
+    key: (i) => Object.keys(data)[i] ?? null,
+    getItem: (k) => (k in data ? data[k] : null),
+    setItem: (k, v) => { data[k] = String(v); },
+    removeItem: (k) => { delete data[k]; },
+  };
 }
 
 test("decisions are kept per week and survive a reload", () => {
@@ -64,6 +71,12 @@ test("decisions are kept per week and survive a reload", () => {
   assert.deepEqual(plain(f.loadDecisions(s, "2026-11-07", CARDS)), [{ login: "ada", as: "skipped" }]);
   // a new week starts fresh: a skip means "not this week"
   assert.deepEqual(plain(f.loadDecisions(s, "2026-11-14", CARDS)), []);
+});
+
+test("saving a week's decisions drops older weeks and leaves other keys alone", () => {
+  const s = memoryStorage({ "pr-post-picks-2026-10-31": "[]", "pr-post-picks-2026-11-07": "[]", "pr-post-theme": "dark" });
+  f.saveDecisions(s, "2026-11-14", [{ login: "bo", as: "added" }]);
+  assert.deepEqual(Object.keys(s.data).sort(), ["pr-post-picks-2026-11-14", "pr-post-theme"]);
 });
 
 test("what is kept in the browser is checked before it is used", () => {

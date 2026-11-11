@@ -57,6 +57,11 @@ def people_api():
 DRAFTS_API = "/api/people/drafts"
 
 
+def script_json(value):
+    """JSON to put inside <script type="application/json">: no "<" at all, so no text can end or bend the block."""
+    return json.dumps(value, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
+
 def configure(site):
     global SITE, PAPER, BASE, SHOW_PRIVATE
     SITE, PAPER, BASE, SHOW_PRIVATE = site, site["title"], site["base_path"], config.private_counts(site)
@@ -813,8 +818,7 @@ def archive_page(editions, people, reports):
 
 
 def settings_page(people):
-    data = json.dumps([{k: v for k, v in p.items() if v not in (None, "", [], False) or k in ("github", "name")} for p in people],
-                      ensure_ascii=False).replace("</", "<\\/")
+    data = script_json([{k: v for k, v in p.items() if v not in (None, "", [], False) or k in ("github", "name")} for p in people])
     return f"""<h1 class="page-hed">People and settings</h1>
 <p class="page-sub">Star the people you care about most so they lead the sidebar and the front page. Drag or use the arrows to reorder. Removing someone stops new reports; their back issues stay.</p>
 <ul class="set-list" id="set-list"></ul>
@@ -939,14 +943,15 @@ def follow_picks_page(latest, reports, repo_url):
             "login": c["login"], "name": c["name"], "profile": safe_url(c["profile"]),
             "avatar": safe_url(avatar) if avatar and config.is_http_url(avatar) else "",
             "score": c["score"], "rec": c["recommendation"], "why": c["why_follow"],
-            "stars": r["standing"]["stars"], "followers": r["standing"]["followers"],
-            "active": r["activity"]["last_12w"],
+            # the numbers the fit score used (refreshed weekly), else the mini report's
+            "stars": r["standing"]["stars"], "followers": c.get("now", {}).get("followers", r["standing"]["followers"]),
+            "active": c.get("now", {}).get("last_12w", r["activity"]["last_12w"]),
             "top": {"repo": top["repo"], "stars": top.get("stars", 0)} if top.get("repo") else None,
         }
         if not api:
             card["cmd"] = follow_lib.add_command(repo_url, c["login"])
         cards.append(card)
-    data = json.dumps({"week": latest["date"], "picks": len(picks), "cards": cards}, ensure_ascii=False).replace("</", "<\\/")
+    data = script_json({"week": latest["date"], "cards": cards})
     attrs = f'data-api="{DRAFTS_API}" data-people="{u("/people/")}"' if api else ""
     keys = '<span class="picks-keys">Keys: right arrow adds, left arrow skips, O opens their GitHub profile, Z goes back.</span>'
     how = "add them to the paper as a draft, or skip them for this week" if api else "copy the command that adds them, or skip them for this week"

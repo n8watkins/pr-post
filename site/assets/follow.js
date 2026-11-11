@@ -39,8 +39,16 @@
       return [];
     }
   }
+  // Saving this week's decisions drops earlier weeks', which nothing reads again.
   function saveDecisions(storage, week, decisions) {
-    try { storage.setItem(storageKey(week), JSON.stringify(decisions)); } catch { /* private window: kept until reload */ }
+    try {
+      const keep = storageKey(week);
+      for (let i = storage.length - 1; i >= 0; i -= 1) {
+        const k = storage.key(i);
+        if (k && k !== keep && k.startsWith(storageKey(""))) storage.removeItem(k);
+      }
+      storage.setItem(keep, JSON.stringify(decisions));
+    } catch { /* private window: kept until reload */ }
   }
 
   // ----- Add to PR Post -----
@@ -263,7 +271,9 @@
         card.dataset.lean = "add";
         r = api ? await requestDraft(window.fetch.bind(window), api, c.login) : await copyCommand(navigator.clipboard, c.cmd, c.login);
         setBusy(false);
-        if (!r.ok) { snapBack(); say(r); return; }
+        // A draft that failed stays on this card. A copy that failed still counts: the command
+        // is shown now and listed again at the end.
+        if (!r.ok && api) { snapBack(); say(r); return; }
       }
       leave(as === "added" ? 1 : -1, () => {
         decisions = decide(decisions, c.login, as);

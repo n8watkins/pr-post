@@ -179,6 +179,8 @@ class Scoring(unittest.TestCase):
         quiet = fl.score(self.r, {}, self.mine, self.cfg, pulse={"followers": 1200, "weeks": [0] * 26})
         busy = fl.score(self.r, {}, self.mine, self.cfg)
         self.assertLess(quiet["parts"]["activity"]["points"], busy["parts"]["activity"]["points"])
+        self.assertEqual(quiet["now"], {"last_12w": 0, "followers": 1200})  # what the picks deck shows
+        self.assertEqual(busy["now"]["followers"], self.r["standing"]["followers"])
 
 
 class Picks(unittest.TestCase):
@@ -278,7 +280,20 @@ class Output(unittest.TestCase):
         self.assertIn('data-api="/api/people/drafts" data-people="/people/"', picks)
         data = json.loads(re.search(r'<script type="application/json" id="picks-data">(.*?)</script>', picks, re.S).group(1))
         self.assertNotIn("cmd", data["cards"][0])
-        self.assertEqual(data["picks"], 1)
+
+    def test_the_deck_shows_the_numbers_the_score_used_and_no_name_can_break_the_page(self):
+        latest = json.loads((self.paper / "follow" / "latest.json").read_text())
+        latest["candidates"][0]["now"] = {"last_12w": 7, "followers": 4321}
+        latest["candidates"][0]["name"] = "x<!--<script></script>"
+        (self.paper / "follow" / "latest.json").write_text(json.dumps(latest))
+        out = Path(self.tmp.name) / "dist"
+        build_site.build(self.paper, out)
+        picks = (out / "follow" / "picks" / "index.html").read_text()
+        raw = re.search(r'<script type="application/json" id="picks-data">(.*?)</script>', picks, re.S).group(1)
+        self.assertNotIn("<", raw)
+        card = json.loads(raw)["cards"][0]
+        self.assertEqual(card["name"], "x<!--<script></script>")
+        self.assertEqual((card["active"], card["followers"]), (7, 4321))
 
     def test_the_deck_deals_picks_then_maybes_and_never_skips(self):
         latest = json.loads((self.paper / "follow" / "latest.json").read_text())

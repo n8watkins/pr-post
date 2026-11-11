@@ -14,7 +14,7 @@
     };
     toggle.addEventListener("click", () => setOpen(!document.body.classList.contains("rail-open")));
     document.addEventListener("click", (e) => {
-      if (document.body.classList.contains("rail-open") && !e.target.closest(".rail") && e.target !== toggle) setOpen(false);
+      if (document.body.classList.contains("rail-open") && !e.target.closest(".rail") && !toggle.contains(e.target)) setOpen(false);
     });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") setOpen(false); });
   }
@@ -77,15 +77,20 @@
   // ----- toast: one at a time, with an optional Undo (also Ctrl/Cmd+Z while it shows) -----
   let toastTimer = null;
   let toastUndo = null;
+  // The live region is in the page before its first message, so screen readers announce it.
+  const toastEl = (() => {
+    if (!$("#people-app, #set-list")) return null;
+    const el = document.createElement("div");
+    el.id = "toast";
+    el.className = "toast";
+    el.setAttribute("role", "status");
+    el.hidden = true;
+    document.body.appendChild(el);
+    return el;
+  })();
   function toast(text, { undo = null, kind = "" } = {}) {
-    let el = $("#toast");
-    if (!el) {
-      el = document.createElement("div");
-      el.id = "toast";
-      el.className = "toast";
-      el.setAttribute("role", "status");
-      document.body.appendChild(el);
-    }
+    const el = toastEl;
+    if (!el) return;
     clearTimeout(toastTimer);
     toastUndo = undo;
     el.className = `toast ${kind}`;
@@ -131,8 +136,8 @@
     let data = { people: [], suppressed: [], changes: [] };
     const open = new Set(); // ids whose edit form is open
 
-    async function api(method, path, body) {
-      const res = await fetch(path, { method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined });
+    async function api(method, path, body, extra = {}) {
+      const res = await fetch(path, { method, headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined, ...extra });
       const out = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(out.error || `That didn't work (${res.status}).`);
       return out;
@@ -174,11 +179,7 @@
       clearTimeout(timer);
       pending = null;
       try {
-        const res = await fetch(`/api/people/${id}`, { method: "DELETE", keepalive: leaving });
-        if (!res.ok) {
-          const out = await res.json().catch(() => ({}));
-          throw new Error(out.error || `That didn't work (${res.status}).`);
-        }
+        await api("DELETE", `/api/people/${id}`, undefined, { keepalive: leaving });
         if (!leaving) await load();
       } catch (err) {
         if (leaving) return;
@@ -258,8 +259,14 @@
       $(".star-btn", li).addEventListener("click", () =>
         act(() => api("PUT", `/api/people/${p.id}`, { entry: { ...e, starred: !e.starred } }), `${e.starred ? "Unstarred" : "Starred"} ${e.name}.`));
       if (p.status === "active") {
-        const ids = list.map((x) => x.id);
-        const move = (d) => { const j = i + d; [ids[i], ids[j]] = [ids[j], ids[i]]; act(() => api("PUT", "/api/people/order", { ids }), "Order saved."); };
+        // Every active id, including someone removed a moment ago and still undoable.
+        const move = (d) => {
+          const ids = data.people.filter((x) => x.status === "active").map((x) => x.id);
+          const a = ids.indexOf(p.id);
+          const b = ids.indexOf(list[i + d].id);
+          [ids[a], ids[b]] = [ids[b], ids[a]];
+          act(() => api("PUT", "/api/people/order", { ids }), "Order saved.");
+        };
         const up = button("↑", () => move(-1), "icon"); up.disabled = i === 0; up.setAttribute("aria-label", `Move ${e.name} up`);
         const down = button("↓", () => move(1), "icon"); down.disabled = i === list.length - 1; down.setAttribute("aria-label", `Move ${e.name} down`);
         actions.append(up, down);
@@ -393,10 +400,16 @@
       $$("[data-move]", li).forEach((b) => b.addEventListener("click", () => move(i, i + Number(b.dataset.move))));
       $("[data-remove]", li).addEventListener("click", () => {
         const [gone] = people.splice(i, 1);
+        const next = people[i]; // put them back before whoever followed them, wherever that is now
         markDirty();
         render();
         toast(`Removed ${gone.name}. Save changes to keep it.`, {
-          undo: () => { people.splice(Math.min(i, people.length), 0, gone); markDirty(); render(); },
+          undo: () => {
+            const at = next ? people.indexOf(next) : -1;
+            people.splice(at < 0 ? people.length : at, 0, gone);
+            markDirty();
+            render();
+          },
         });
       });
       li.addEventListener("dragstart", () => { dragIndex = i; li.classList.add("dragging"); });
