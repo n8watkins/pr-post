@@ -33,6 +33,14 @@ That page is what the email digest links to; the digest itself carries only the 
 `data/<id>.json` can run to hundreds of kilobytes for a busy person, and an AI writer pays for every byte it reads on every later step, so reading briefs instead is the biggest single saving.
 Commit `briefs/` with `data/` and `stats/`.
 
+Each brief is cut to that person's report window and opens with it, as in `Window: 2026-11-07 to 2026-11-11 (since the 2026-11-07 weekly), for a midweek update.`
+The window ends on the collection date; a weekly report (Saturday) starts at the newest weekly report or 7 days back, and a midweek update at the newest report of either kind or 4 days back, both ends included.
+Every writer therefore reads the same items, and none repeats what an earlier report covered; the Gemini writer applies the same rule, and `tests/test_brief.py` checks that the two agree.
+`python3 scripts/brief.py --kind weekly` cuts the briefs for the other kind of run.
+
+The Claude routine ends each run with `scripts/writer_usage.py`, which stores `logs/writer-usage/<date>-claude.json`: start and finish time, turns, the files it read and their bytes, what it wrote, and tokens when the model was told them (otherwise `null`).
+Pass that file to `python3 -m tools.compare unblind --claude-usage` for the cost table.
+
 [INSTRUCTIONS.md](../INSTRUCTIONS.md) describes each file's format in detail.
 The summaries file looks like this:
 
