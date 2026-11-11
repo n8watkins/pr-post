@@ -10,10 +10,16 @@ $notes
 
 $top_news
 
+#### What their projects are (from their profile)
+
+$projects
+
+When a bullet is about one of these projects, say in a few words what it is, taken from its line here, still within $bullet_words words.
+
 #### Their profile
 
 $profile
 
-#### Their brief, trimmed to the window (each item starts with its id in brackets)
+#### Their brief, trimmed to the window (each item starts with its id in brackets and ends with the link to use)
 
 $brief

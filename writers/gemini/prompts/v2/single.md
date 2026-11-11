@@ -13,8 +13,10 @@ Give each person the same care as if theirs were the only report: say what each 
 
 ## The front page
 
-- `lead_id`: the id of the person whose news deserves the lead: a big launch, a 1.0 release or a large speedup beats a pile of small fixes.
-- `tldr`: 3 to 5 bullets for the whole issue, at most 15 words each, biggest news first.
+- The lead is $lead_name (id: $lead_id), picked by code for the biggest news of this run; write the lead about them and nobody else.
+  These items won it:
+$lead_why
+- `tldr`: 3 to 5 bullets for the whole issue, at most $tldr_words words each (count them), biggest news first.
   Each names the person and the concrete thing that shipped (a release, a launch, a speedup with its figure), so it makes sense alone in the email.
   Include the reader when they shipped something big, as "you".
 - `weather`: one playful line about this run's actual news, like a newspaper weather box, naming at least one real project.
@@ -28,6 +30,7 @@ Give each person the same care as if theirs were the only report: say what each 
 
 Births, obituaries and the quote of the week are filled in by code; do not write them.
 The lead, the TL;DR, the weather and the corrections together are at most $edition_cap words.
+The front page is plain text: no Markdown links and no addresses (the lead's sources are added by code).
 
 ## Previous edition's guesses
 

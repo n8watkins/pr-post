@@ -10,7 +10,7 @@
 - The first bullet is this person's line in the email, so it must stand alone: the project and what shipped.
 
 ## <Project> (at most 3 sections, busiest first)
-- 1 to 3 bullets in plain English: what changed and why it matters, then a Markdown link to the PR, commit, release or video from the brief.
+- 1 to 3 bullets in plain English: what changed and why it matters, then the item's `link:` from the brief, copied exactly.
 - Group related PRs into one bullet ("several PRs fixing backup and restore") instead of listing them.
 - Say what the project is in a few words only when the profile does not mention it yet, and only in the words of its "New repos" or README line.
 

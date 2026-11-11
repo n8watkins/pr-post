@@ -1,12 +1,14 @@
 Write the front page of this $kind_name of The Pull Request Post, dated $date_long.
 You see only the reporters' finished work below: each active person's first report line and story.
-The lead story is about $lead_name; their full report is included.
+The lead story is about $lead_name, picked by code for the biggest news of this run; their full report is included.
+Write the lead about $lead_name and nobody else; these items won it:
+$lead_why
 The reader is $reader_name: when you mention them, write "you" ("you shipped..."); everyone else is named in the third person.
 Births, obituaries and the quote of the week are filled in by code; do not write them.
 
 ## What to return
 
-- `tldr`: 3 to 5 bullets for the whole issue, at most 15 words each, biggest news first.
+- `tldr`: 3 to 5 bullets for the whole issue, at most $tldr_words words each (count them), biggest news first.
   Each names the person and the concrete thing that shipped (a release, a launch, a speedup with its figure), so it makes sense alone in the email.
   Include the reader when they shipped something big.
 - `weather`: one playful line about this run's actual news, like a newspaper weather box, naming at least one real project.
@@ -19,6 +21,7 @@ Births, obituaries and the quote of the week are filled in by code; do not write
   If none turned out wrong, return a single line saying there are no corrections this time.
 
 The lead, the TL;DR, the weather and the corrections together are at most $edition_cap words.
+All of it is plain text: no Markdown links and no addresses (the lead's sources are added by code).
 Every number must already appear below; never count or add up yourself.
 
 ## Previous edition's guesses

@@ -462,10 +462,16 @@ class V2ChecksTest(FixtureCase):
         self.assertEqual(pipeline.normalize_answer({"report_md": "Quiet since Nov 7."}, "update")["report_md"], "Quiet since Nov 7.")
 
     def test_the_reader_leads_only_when_their_news_clearly_wins(self):
-        answers = {"ada-fixture": {"lead_score": 8}, "sol-fixture": {"lead_score": 8}}
-        self.assertEqual(pipeline.choose_lead(self.p, answers), "ada-fixture")
-        answers["sol-fixture"]["lead_score"] = 10
-        self.assertEqual(pipeline.choose_lead(self.p, answers), "sol-fixture")
+        ada, sol = dict(self.other), dict(self.reader)
+        news = lambda *scores: [{"kind": "pr", "score": s, "title": "", "repo": "", "url": ""} for s in scores]
+        ada["highlights"], sol["highlights"] = news(9, 8, 8), news(9, 9, 8)  # the reader is a little ahead
+        ada["numbers"] = sol["numbers"] = ["4 merged PRs, 0 releases."]
+        self.assertEqual(prepare.pick_lead([sol, ada]), "ada-fixture")
+        sol["highlights"] = news(12, 9, 9)  # and now clearly ahead
+        self.assertEqual(prepare.pick_lead([sol, ada]), "sol-fixture")
+        ada["self"] = False
+        self.assertEqual(prepare.pick_lead([ada]), "ada-fixture")
+        self.assertIsNone(prepare.pick_lead([]))
 
     def test_the_fallback_uses_only_the_brief(self):
         fb = pipeline.fallback_answer(self.other, "update")
@@ -484,6 +490,174 @@ class V2ChecksTest(FixtureCase):
         self.assertTrue(want_b and want_o)
         self.assertTrue(all(not b["text"].endswith("..") or b["text"].endswith("...") for b in births))
         self.assertNotIn("....", "".join(b["text"] for b in births))
+
+
+class ProjectLinesTest(FixtureCase):
+    kind = "update"
+    day = WEDNESDAY
+    PROFILE = """# Ada Example
+
+Builds tools.
+
+## Active projects
+
+### sync
+[ada/sync](https://github.com/ada/sync).
+Product, open source (about 2k stars).
+Keeps every laptop's dotfiles in step over SSH, with no server. It also does more.
+Audience: people with many machines.
+
+History:
+- 2026-11-01: created.
+
+### crew
+[ada/crew](https://github.com/ada/crew).
+Personal tool: you talk to one agent and it runs a crew of others.
+
+### quiet-one
+[ada/quiet-one](https://github.com/ada/quiet-one).
+Internal tooling for the agency.
+
+## Retired
+### old
+[ada/old](https://github.com/ada/old).
+An old thing that should not be read as active.
+"""
+
+    def test_both_profile_shapes_give_one_line_per_project(self):
+        got = prepare.project_lines(self.PROFILE)
+        self.assertEqual(got, [
+            {"name": "sync", "repo": "ada/sync", "what": "Keeps every laptop's dotfiles in step over SSH, with no server"},
+            {"name": "crew", "repo": "ada/crew", "what": "you talk to one agent and it runs a crew of others"},
+            {"name": "quiet-one", "repo": "ada/quiet-one", "what": "Internal tooling for the agency"},
+        ])  # a classification line gives way to a description; retired projects are left out
+        shared = gemini_fixture.SHARED_PROFILE.format(name="Ada", repo="ada/tool-1")
+        self.assertEqual(prepare.project_lines(shared), [{"name": "tool-1", "repo": "ada/tool-1", "what": "a tool for tidy builds"}])
+
+    def test_only_projects_the_window_touches_are_listed(self):
+        projects = prepare.project_lines(self.PROFILE)
+        items = [{"repo": "ada/crew"}, {"repo": "someone/else"}]
+        self.assertEqual([p["name"] for p in prepare.projects_in_window(projects, items)], ["crew"])
+
+    def test_the_request_says_what_each_project_is(self):
+        prep = self.prep()
+        ada = self.person(prep, "ada-fixture")
+        self.assertTrue(ada["projects"])
+        prompt = pipeline.person_request(pipeline.load_prompts(), prep, ada)["prompt"]
+        self.assertIn("#### What their projects are (from their profile)", prompt)
+        self.assertIn(f"- {ada['projects'][0]['name']}: {ada['projects'][0]['what']}\n", prompt)
+
+    def test_a_you_quoted_from_a_project_line_is_not_the_writer_saying_you(self):
+        prep = self.prep()
+        ada = self.person(prep, "ada-fixture")
+        ada["projects"] = [{"name": "crew", "repo": "ada/crew", "what": "you talk to one agent and it runs a crew of others"}]
+        top = ada["highlights"][0]
+        body = (f"- Ada worked on crew, where you talk to one agent and it runs the rest: [PR 1]({top['url']}).\n"
+                f"- Ada also kept the project tidy this week: [PR 1]({top['url']}).\n")
+        answer = {"report_md": body, "story": {"beat": "Tools desk", "headline": "Ada ships", "summary": "Ada had a week."}}
+        problems = pipeline.check_person(answer, ada, "update", ada["brief"] + ada["projects"][0]["what"])
+        self.assertFalse(any("is not the reader" in p for p in problems))
+
+
+class LeadPickTest(FixtureCase):
+    kind = "update"
+    day = WEDNESDAY
+    run_split = PipelineTest.run_split
+
+    def test_numbers_are_read_from_the_brief(self):
+        self.assertEqual(prepare.number_counts(["423 merged PRs, 474 opened, 500+ commits, 34 repos touched, 9 releases, 1 videos."]),
+                         {"merged": 423, "releases": 9, "videos": 1})
+        self.assertEqual(prepare.number_counts([]), {"merged": 0, "releases": 0, "videos": 0})
+
+    def test_bigger_news_beats_more_merges_and_volume_is_capped(self):
+        item = lambda score, kind="pr": {"kind": kind, "score": score, "title": "", "repo": "", "url": ""}
+        big = {"id": "big", "self": False, "highlights": [item(12, "release"), item(9), item(8)], "numbers": ["3 merged PRs, 1 releases."]}
+        busy = {"id": "busy", "self": False, "highlights": [item(9), item(8), item(8)], "numbers": ["900 merged PRs, 40 releases."]}
+        self.assertEqual(prepare.pick_lead([busy, big]), "big")
+        self.assertLessEqual(prepare.lead_value(busy) - (9 + 9 + 8 + 8), prepare.VOLUME_CAP)
+        twin = {**busy, "id": "twin", "numbers": ["3 merged PRs, 0 releases."]}
+        self.assertEqual(prepare.pick_lead([twin, busy]), "busy")  # with the same news, more shipped work wins
+
+    def test_prepare_picks_the_lead_and_the_edition_request_gets_it(self):
+        mock, runner, prep, answers, front, lead_id, failed = self.run_split()
+        self.assertEqual(lead_id, prep["lead"])
+        self.assertNotEqual(lead_id, "sol-fixture")  # the reader's fixture news does not clearly win
+        lead = self.person(prep, lead_id)
+        edition_prompt = mock.requests[-1]["body"]["contents"][0]["parts"][0]["text"]
+        self.assertIn(f"The lead story is about {lead['name']}, picked by code", edition_prompt)
+        self.assertIn(pipeline.lead_why(lead), edition_prompt)
+        person_schema = mock.requests[0]["body"]["generationConfig"]["responseSchema"]
+        self.assertNotIn("lead_score", person_schema["properties"])  # the model no longer scores the lead
+
+    def test_a_lead_without_a_report_passes_to_the_next(self):
+        prep = self.prep()
+        answers = {p["id"]: {} for p in prep["people"] if p["status"] == "active" and p["id"] != prep["lead"]}
+        lead = pipeline.choose_lead(prep, answers)
+        self.assertIn(lead, answers)
+        self.assertEqual(lead, prepare.pick_lead([p for p in prep["people"] if p["id"] in answers]))
+
+    def test_single_mode_is_told_the_lead_and_returns_no_lead_id(self):
+        prep = self.prep()
+        req = pipeline.single_request(pipeline.load_prompts(), prep, None)
+        lead = self.person(prep, prep["lead"])
+        self.assertIn(f"The lead is {lead['name']} (id: {lead['id']}), picked by code", req["prompt"])
+        self.assertNotIn("lead_id", req["schema"]["properties"])
+
+
+class FewerRetriesTest(FixtureCase):
+    kind = "update"
+    day = WEDNESDAY
+    run_split = PipelineTest.run_split
+
+    def test_short_labels_come_from_the_address(self):
+        self.assertEqual(pipeline.short_label("https://github.com/o/tool/pull/15162"), "PR 15162")
+        self.assertEqual(pipeline.short_label("https://github.com/o/CodexBar/releases/tag/v0.84.0"), "CodexBar v0.84.0")
+        self.assertEqual(pipeline.short_label("https://github.com/o/tool/releases/tag/tool-v2.0"), "tool-v2.0")
+        self.assertEqual(pipeline.short_label("https://github.com/o/tool/commit/0123456789abcdef"), "commit 0123456")
+        self.assertEqual(pipeline.short_label("https://www.youtube.com/watch?v=abc"), "video")
+        self.assertEqual(pipeline.short_label("https://github.com/o/fresh"), "fresh")
+        self.assertEqual(pipeline.short_label("https://example.invalid/x"), "link")
+
+    def test_every_item_in_the_request_carries_its_exact_link(self):
+        prep = self.prep()
+        ada = self.person(prep, "ada-fixture")
+        prompt = pipeline.person_request(pipeline.load_prompts(), prep, ada)["prompt"]
+        for item in ada["items"]:
+            self.assertIn(f"| link: [{pipeline.short_label(item['url'])}]({item['url']})", prompt)
+        self.assertIn("## Before you answer, check", prompt)
+        self.assertIn(f"every bullet has at most {checks.BULLET_WORDS} words", prompt)
+
+    def test_long_labels_and_extra_bullets_are_fixed_by_code(self):
+        url = "https://github.com/o/tool/pull/7"
+        body = "".join(f"- Ada changed thing {n} for the people who use it: [a whole pasted pull request title here]({url}).\n" for n in range(6))
+        a = pipeline.normalize_answer({"report_md": body}, "update")
+        self.assertEqual(a["report_md"].count("- "), pipeline.MAX_UPDATE_BULLETS)
+        self.assertNotIn("pasted", a["report_md"])
+        self.assertIn(f"[PR 7]({url})", a["report_md"])
+        odd = "- Ada did a thing: [a whole pasted title of many words here](https://example.invalid/x)."
+        self.assertEqual(pipeline.normalize_answer({"report_md": odd}, "update")["report_md"], odd)  # no short label to give
+
+    def test_links_on_the_front_page_cost_no_retry(self):
+        def responder(system, prompt, schema, n):
+            answer = fake.respond(system, prompt, schema)
+            if "tldr" in schema["properties"]:
+                answer["tldr"][0] = "Ada shipped [the tool](https://example.invalid/x)."
+            return 200, MockGemini.wrap(answer)
+        mock, runner, prep, answers, front, lead_id, failed = self.run_split(responder)
+        self.assertEqual(runner.calls[-1]["attempts"], 1)
+        self.assertEqual(front["tldr"][0], "Ada shipped the tool.")
+
+    def test_trimming_an_already_trimmed_brief_changes_nothing(self):
+        prep = self.prep()
+        for p in prep["people"]:
+            if p["status"] != "active":
+                continue
+            again, items = prepare.trim(p["brief"], dt.date.fromisoformat(p["start"]), dt.date.fromisoformat(p["end"]))
+            self.assertEqual(again, p["brief"])
+            self.assertEqual(items, [{k: v for k, v in i.items()} for i in p["items"]])
+        upstream = TrimTest.BRIEF.replace("- 2026-11-01T10:00:00Z ada/tool#11 Old work <https://github.com/ada/tool/pull/11>\n  Old description.\n", "")
+        upstream = upstream.replace("- plus 4 more in data/ada.json\n", "").replace("## Releases\n- 2026-10-30 ada/tool v0.9 <https://github.com/ada/tool/releases/tag/v0.9>\n", "")
+        self.assertEqual(prepare.trim(upstream, dt.date(2026, 11, 7), SATURDAY)[1], prepare.trim(TrimTest.BRIEF, dt.date(2026, 11, 7), SATURDAY)[1])
 
 
 class FallbackRunTest(FixtureCase):

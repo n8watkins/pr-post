@@ -5,8 +5,8 @@
   Use exactly this format:
 
 ```markdown
-- 2 to 4 bullets, at most 25 words each, biggest news first.
-- Each bullet: the project, then in plain words what changed and why it matters, then a Markdown link to the item, like "[PR 19236](https://...)" or "[v1.5.2](https://...)".
+- 2 to 4 bullets (never more than 4), at most 25 words each (aim for 15 to 20), biggest news first.
+- Each bullet: the project, then in plain words what changed and why it matters, then the item's `link:` copied exactly, like "[PR 19236](https://...)" or "[CodexBar v0.84.0](https://...)".
 - The first bullet must stand alone: it is this person's line in the email.
 ```
 

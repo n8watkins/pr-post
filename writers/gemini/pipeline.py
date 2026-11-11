@@ -14,7 +14,9 @@ import time
 from pathlib import Path
 from string import Template
 
-from . import api, checks
+from urllib.parse import unquote
+
+from . import api, checks, prepare
 from .prepare import QUOTABLE
 
 PROMPTS = Path(__file__).resolve().parent / "prompts"
@@ -27,10 +29,9 @@ PERSON_FIELDS = {
     "report_md": {"type": "STRING"},
     "story": STORY,
     "profile_lines": {"type": "ARRAY", "items": {"type": "STRING"}},
-    "lead_score": {"type": "INTEGER"},
     "quote_candidate_ids": {"type": "ARRAY", "items": {"type": "STRING"}},
 }
-PERSON_REQUIRED = ["report_md", "story", "profile_lines", "lead_score", "quote_candidate_ids"]
+PERSON_REQUIRED = ["report_md", "story", "profile_lines", "quote_candidate_ids"]
 EDITION_FIELDS = {
     "tldr": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": 3, "maxItems": 5},
     "weather": {"type": "STRING"},
@@ -59,8 +60,8 @@ def single_schema():
     person = {"type": "OBJECT", "properties": {"id": {"type": "STRING"}, **PERSON_FIELDS, "profile_md": {"type": "STRING"}},
               "required": ["id"] + PERSON_REQUIRED}
     return {"type": "OBJECT",
-            "properties": {"people": {"type": "ARRAY", "items": person}, "lead_id": {"type": "STRING"}, **EDITION_FIELDS},
-            "required": ["people", "lead_id"] + EDITION_REQUIRED}
+            "properties": {"people": {"type": "ARRAY", "items": person}, **EDITION_FIELDS},
+            "required": ["people"] + EDITION_REQUIRED}
 
 
 # ---------- prompts ----------
@@ -118,13 +119,71 @@ def perspective(person):
             "never write \"you\" or \"your\" in this report.")
 
 
+GITHUB_PATH = re.compile(r"^https?://github\.com/([\w.-]+)/([\w.-]+)(?:/(.*))?$")
+
+
+def short_label(url):
+    """The short link label an address calls for: "PR 15162", "CodexBar v0.84.0", "commit 0123456", "video" or the repo name."""
+    url = (url or "").rstrip("/")
+    if re.search(r"(youtube\.com|youtu\.be)/", url):
+        return "video"
+    m = GITHUB_PATH.match(url)
+    if not m:
+        return "link"
+    repo, rest = m.group(2), m.group(3) or ""
+    pr = re.match(r"pull/(\d+)", rest)
+    if pr:
+        return f"PR {pr.group(1)}"
+    tag = re.match(r"releases/tag/(.+)", rest)
+    if tag:
+        name = unquote(tag.group(1))
+        label = name if repo.lower() in name.lower() else f"{repo} {name}"
+        return " ".join(label.split()[:LABEL_WORDS])
+    sha = re.match(r"commit/([0-9a-f]{7})", rest)
+    if sha:
+        return f"commit {sha.group(1)}"
+    return repo
+
+
+def link_for(url):
+    return f"[{short_label(url)}]({url})"
+
+
+ITEM_LINE = re.compile(r"^(- \[i\d+\] .*) <(https?://\S+)>$")
+
+
+def linked_brief(brief):
+    """The trimmed brief as the model sees it: each item ends with the exact Markdown link to use, short label included."""
+    return "\n".join(ITEM_LINE.sub(lambda m: f"{m.group(1)} | link: {link_for(m.group(2))}", line) for line in (brief or "").splitlines()) + "\n"
+
+
+def project_for(person, repo):
+    """The profile's line for the project a repo belongs to, if any."""
+    name = (repo or "").split("/")[-1].lower()
+    for p in person.get("projects") or []:
+        if (p["repo"] and p["repo"].lower() == (repo or "").lower()) or re.split(r"[\s(]", p["name"].lower())[0] == name:
+            return p
+    return None
+
+
 def top_news_text(person):
-    """The window's most newsworthy items, best first, computed in prepare.py, as lines for the prompt."""
+    """The window's most newsworthy items, best first, computed in prepare.py, as lines for the prompt, each with its link."""
     lines = []
     for h in person.get("highlights") or []:
         ref = f"[{h['id']}] " if h["id"] else ""
-        lines.append(f"- {ref}{h['label']}: {h['repo']} {h['title']} <{h['url']}>".replace("  ", " "))
+        lines.append(f"- {ref}{h['label']}: {h['repo']} {h['title']} | link: {link_for(h['url'])}".replace("  ", " "))
     return "\n".join(lines) if lines else "(nothing stands out)"
+
+
+def projects_text(person):
+    """What each project this window touches is, one line each, from the profile's "Active projects"."""
+    lines = [f"- {p['name']}" + (f" ({p['repo']})" if p["repo"] else "") + f": {p['what']}" for p in person.get("projects") or []]
+    return "\n".join(lines) if lines else "(none of their profile's projects; say what a project is only from the brief)"
+
+
+def quoted_sources(person):
+    """Text a report may quote, whose own "you" is not the writer addressing anyone: the brief and the profile's project lines."""
+    return (person.get("brief") or "") + "\n" + "\n".join(p["what"] for p in person.get("projects") or [])
 
 
 def person_block(prompts, person, kind):
@@ -136,8 +195,10 @@ def person_block(prompts, person, kind):
         notes.append("- They have no profile yet: also return `profile_md`.")
     return fill(prompts, "person", name=person["name"], id=person["id"], start_long=long_day(person["start"]),
                 end_long=long_day(person["end"]), title=title_for(person, kind)[2:], known_for=person["known_for"] or "(not given)",
-                notes="\n".join(notes) + ("\n" if notes else ""), profile=person.get("profile") or "(none yet)", brief=person["brief"],
-                perspective=perspective(person), top_news=top_news_text(person), first_name=first_name(person))
+                notes="\n".join(notes) + ("\n" if notes else ""), profile=person.get("profile") or "(none yet)",
+                brief=linked_brief(person["brief"]), perspective=perspective(person), top_news=top_news_text(person),
+                projects=projects_text(person), first_name=first_name(person), bullet_words=checks.BULLET_WORDS,
+                cap=checks.CAPS[kind], label_words=LABEL_WORDS)
 
 
 def system_prompt(prompts, prep):
@@ -147,7 +208,8 @@ def system_prompt(prompts, prep):
 def person_request(prompts, prep, person):
     kind = prep["kind"]
     prompt = fill(prompts, "one_person", kind_name="weekly" if kind == "weekly" else "midweek update",
-                  report_rules=prompts["files"][f"format_{kind}"], fields=prompts["files"]["fields"], person=person_block(prompts, person, kind))
+                  report_rules=prompts["files"][f"format_{kind}"], fields=prompts["files"]["fields"], person=person_block(prompts, person, kind),
+                  bullet_words=checks.BULLET_WORDS, cap=checks.CAPS[kind], label_words=LABEL_WORDS)
     return {"stage": "person", "id": person["id"], "system": system_prompt(prompts, prep), "prompt": prompt,
             "schema": person_schema(not person.get("profile"))}
 
@@ -175,8 +237,14 @@ def email_line(report):
     return next((line.strip() for line in (report or "").splitlines()[1:] if line.strip()), "")
 
 
+def lead_why(person):
+    """Why code picked this person to lead: their biggest items, as plain lines (no links: the front page has none)."""
+    tops = [h for h in person.get("highlights") or [] if h["kind"] != "archived"][:prepare.LEAD_ITEMS]
+    return "\n".join(f"- {h['label']}: {h['repo'].split('/')[-1]} {h['title']}".rstrip() for h in tops) or "- (their report)"
+
+
 def edition_request(prompts, prep, answers, lead_id, previous):
-    """Stage 2: sees only stage 1's answers (no briefs)."""
+    """Stage 2: sees only stage 1's answers (no briefs), and the lead code picked with the items that won it."""
     by_id = {p["id"]: p for p in prep["people"]}
     lead = by_id[lead_id]
     stories = "\n".join(
@@ -189,14 +257,18 @@ def edition_request(prompts, prep, answers, lead_id, previous):
     prompt = fill(prompts, "edition", kind_name=kind_name(prep["kind"]), date_long=long_day(prep["date"]), lead_name=lead["name"],
                   edition_cap=checks.CAPS["edition"], guesses=guesses_text(previous), lead_report=answers[lead_id]["report_full"],
                   stories=stories or "None.", quiet=quiet_text(prep), lines=lines or "None.",
-                  reader_name=reader["name"] if reader else "(nobody on the list)")
+                  reader_name=reader["name"] if reader else "(nobody on the list)", lead_why=lead_why(lead),
+                  tldr_words=checks.TLDR_WORDS)
     return {"stage": "edition", "id": None, "system": system_prompt(prompts, prep), "prompt": prompt, "schema": edition_schema()}
 
 
 def single_request(prompts, prep, previous):
     kind = prep["kind"]
     active = [p for p in prep["people"] if p["status"] == "active"]
+    lead = next((p for p in active if p["id"] == prep.get("lead")), active[0] if active else None)
     prompt = fill(prompts, "single", kind_name=kind_name(kind), date_long=long_day(prep["date"]),
+                  lead_name=lead["name"] if lead else "(nobody)", lead_id=lead["id"] if lead else "", lead_why=lead_why(lead or {}),
+                  tldr_words=checks.TLDR_WORDS,
                   report_rules=prompts["files"][f"format_{kind}"], fields=prompts["files"]["fields"], edition_cap=checks.CAPS["edition"],
                   guesses=guesses_text(previous), quiet=quiet_text(prep),
                   people="\n".join(person_block(prompts, p, kind) for p in active))
@@ -248,7 +320,46 @@ def normalize_answer(answer, kind):
     if kind == "update" and not QUIET_RE.match(body.strip()):
         body = "\n".join(f"- {line.strip()}" if line.strip() and not line.lstrip().startswith(("- ", "#", "* ")) else
                          re.sub(r"^\s*\*\s", "- ", line) for line in body.splitlines())
-    answer["report_md"] = SHA_LABEL.sub(lambda m: f"[{m.group(1) or ''}{m.group(2)}]", body)
+    body = SHA_LABEL.sub(lambda m: f"[{m.group(1) or ''}{m.group(2)}]", body)
+    # A pasted title as a link label becomes the short label its address calls for ("PR 15162", "v1.5.2").
+    body = checks.MD_LINK.sub(lambda m: f"[{short_label(m.group(2))}]({m.group(2)})" if checks.words(m.group(1)) > LABEL_WORDS
+                              and short_label(m.group(2)) != "link" else m.group(0), body)
+    if kind == "update":
+        body = keep_bullets(body, MAX_UPDATE_BULLETS)
+    answer["report_md"] = body
+    return answer
+
+
+MAX_UPDATE_BULLETS = 4
+
+
+def keep_bullets(body, n):
+    """The body with only its first `n` bullets (they come biggest news first)."""
+    out, seen = [], 0
+    for line in body.splitlines():
+        if line.startswith("- "):
+            seen += 1
+            if seen > n:
+                continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def normalize_front(answer):
+    """The front page with any Markdown links reduced to their labels, as the edition prints them (in place)."""
+    if not isinstance(answer, dict):
+        return answer
+    if isinstance(answer.get("tldr"), list):
+        answer["tldr"] = [plain(b) if isinstance(b, str) else b for b in answer["tldr"]]
+    lead = answer.get("lead")
+    if isinstance(lead, dict):
+        for k in ("headline", "deck"):
+            if isinstance(lead.get(k), str):
+                lead[k] = plain(lead[k])
+        if isinstance(lead.get("body"), list):
+            lead["body"] = [plain(b) if isinstance(b, str) else b for b in lead["body"]]
+    if isinstance(answer.get("weather"), str):
+        answer["weather"] = plain(answer["weather"])
     return answer
 
 
@@ -276,7 +387,7 @@ def check_person(answer, person, kind, input_text):
                         "link only to the brief's items")
     # Who "you" is.
     written = body + "\n" + story.get("headline", "") + "\n" + story.get("summary", "")
-    if not person["self"] and checks.second_person(written, person.get("brief", "")):
+    if not person["self"] and checks.second_person(written, quoted_sources(person)):
         problems.append(f"{person['name']} is not the reader, but the report or story says \"you\" or \"your\"; "
                         f"write about {first_name(person)} in the third person")
     quiet = bool(QUIET_RE.match(body.strip()))
@@ -379,9 +490,7 @@ def check_single(answer, prep, input_text):
             if not person.get("profile") and not a.get("profile_md"):
                 problems.append(f"people[{a['id']}] is missing profile_md")
             problems += [f"people[{a['id']}].{p}" for p in check_person(a, person, prep["kind"], input_text)]
-    if answer.get("lead_id") not in active:
-        problems.append("lead_id must be the id of one of the people")
-    return problems + check_edition(answer, input_text)
+    return problems + check_edition(normalize_front(answer), input_text)
 
 
 # ---------- calling, with one retry ----------
@@ -522,8 +631,7 @@ def fallback_answer(person, kind):
              "summary": clip_text(f"{fallback_line(first)}", 160).replace("[", "").replace("]", "")}
     story["summary"] = re.sub(r"\((https?://[^)\s]+)\)", "", story["summary"])
     quotable = [h["id"] for h in tops if h["kind"] in QUOTABLE and h["id"]]
-    return {"report_md": body, "story": story, "profile_lines": [], "lead_score": min(10, max(0, first["score"] - 3)),
-            "quote_candidate_ids": quotable, "fallback": True}
+    return {"report_md": body, "story": story, "profile_lines": [], "quote_candidate_ids": quotable, "fallback": True}
 
 
 # ---------- stage 3: assemble in code ----------
@@ -603,12 +711,11 @@ def births_and_obituaries(prep):
 
 
 def choose_lead(prep, answers):
-    """The person whose news leads: the model's lead_score, then the ranked news value. The reader already knows what
-    they shipped, so their own score counts one point less: they lead only when their news clearly beats everyone's."""
-    by_id = {p["id"]: p for p in prep["people"]}
-    top = lambda pid: max((h["score"] for h in by_id[pid].get("highlights") or []), default=0)
-    score = lambda pid: max(0, min(10, int(answers[pid].get("lead_score") or 0))) - (1 if by_id[pid]["self"] else 0)
-    return max(answers, key=lambda pid: (score(pid), top(pid), by_id[pid]["starred"], len(by_id[pid]["items"])))
+    """The person whose news leads, picked by code (prepare.pick_lead: the biggest ranked news and numbers; the reader
+    only when theirs clearly wins), among the people who have a report. The model only writes the lead."""
+    if prep.get("lead") in answers:
+        return prep["lead"]
+    return prepare.pick_lead([p for p in prep["people"] if p["id"] in answers])
 
 
 def clean_profile_line(line):
@@ -633,7 +740,8 @@ def assemble(prep, answers, front, lead_id, model, prompts, mode):
                 files[f"profiles/{p['id']}.md"] = p["profile"].rstrip("\n") + "\n" + lines
     if front is None or lead_id is None:
         return files, None
-    order = [lead_id] + sorted((pid for pid in answers if pid != lead_id), key=lambda pid: -int(answers[pid].get("lead_score") or 0))
+    by_id = {p["id"]: p for p in prep["people"]}
+    order = [lead_id] + sorted((pid for pid in answers if pid != lead_id), key=lambda pid: -prepare.lead_value(by_id[pid]))
     stories = [{"id": pid, **answers[pid]["story"]} for pid in order[1:]]
     if kind == "weekly":
         stories += [quiet_story(p) for p in prep["people"] if p["status"] == "quiet"]
@@ -666,7 +774,7 @@ def wrong_bullet(line, person, input_text):
     allowed = {u.rstrip(".,;:") for u in brief_urls(person)}
     if any(u.rstrip(".,;:") not in allowed for u in checks.URL_RE.findall(line)):
         return True
-    return not person["self"] and checks.second_person(line, person.get("brief", ""))
+    return not person["self"] and checks.second_person(line, quoted_sources(person))
 
 
 def repair(answer, person, kind, input_text):
@@ -722,7 +830,7 @@ def run_split(runner, prep, previous):
         return answers, None, None, failed
     lead_id = choose_lead(prep, answers)
     req = edition_request(prompts, prep, answers, lead_id, previous)
-    front, _ = runner.run(req, lambda a: check_edition(a, req["prompt"], answers[lead_id]["report_md"]))
+    front, _ = runner.run(req, lambda a: check_edition(normalize_front(a), req["prompt"], answers[lead_id]["report_md"]))
     if front is None:
         failed.append("edition")
     return answers, front, lead_id, failed
@@ -752,9 +860,9 @@ def run_single(runner, prep, previous):
     if runner.calls:
         runner.calls[-1]["fallback_ids"], runner.calls[-1]["repaired_ids"] = fixed["fallback"], fixed["repaired"]
     failed = [pid for pid in by_id if pid not in answers]
+    lead_id = choose_lead(prep, answers) if answers else None
     if answer is None:
-        return answers, None, (choose_lead(prep, answers) if answers else None), failed + ["single"]
-    lead_id = answer["lead_id"] if answer["lead_id"] in answers else (choose_lead(prep, answers) if answers else None)
+        return answers, None, lead_id, failed + ["single"]
     front = {k: answer[k] for k in EDITION_REQUIRED}
     return answers, front, lead_id, failed
 
@@ -778,9 +886,9 @@ def plan(prompts, prep, mode, previous):
         for p in active:
             reqs.append(person_request(prompts, prep, p))
             body = ("## TL;DR\n" + "- placeholder words " * 60) if prep["kind"] == "weekly" else "- placeholder words " * 30
-            fake[p["id"]] = {"story": PLACEHOLDER_STORY, "report_full": report_full(p, prep["kind"], body), "lead_score": 0}
+            fake[p["id"]] = {"story": PLACEHOLDER_STORY, "report_full": report_full(p, prep["kind"], body)}
         if fake:
-            reqs.append(edition_request(prompts, prep, fake, next(iter(fake)), previous))
+            reqs.append(edition_request(prompts, prep, fake, choose_lead(prep, fake), previous))
     out = []
     for r in reqs:
         est_in = api.estimate_tokens(r["system"] + r["prompt"] + json.dumps(r["schema"]))
