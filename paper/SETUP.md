@@ -14,6 +14,7 @@ Values never go in this repository or in a chat: secrets go through `pass-env` (
 | `ACTIONS_TOKEN` | Secret | Worker | `pr-post/ACTIONS_TOKEN` |
 | `ALLOWED_EMAILS` | Secret | Worker | |
 | `FOLLOW_GITHUB_TOKEN` | Secret | Actions | `pr-post/FOLLOW_GITHUB_TOKEN` |
+| `GEMINI_API_KEY` | Secret | Actions (the scheduled Gemini writer, `paper-gemini.yml`) | `pr-post/GEMINI_API_KEY` |
 | `CLOUDFLARE_API_TOKEN` | Secret | Actions | `pr-post/CLOUDFLARE_API_TOKEN` |
 | `PR_POST_API` | Secret (so run logs mask it), never a variable | Actions, and the routine's environment | The live Worker's address |
 | `PAPER_DEPLOY_LIVE` | Variable | Actions | `true` (the live Worker runs this code since 2026-11-11) |

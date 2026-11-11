@@ -12,11 +12,20 @@
 const REQUEST_RE = /^[0-9a-f]{32}$/;
 const REQUEST_TTL_MS = 24 * 3600 * 1000;
 
-// Cron expression (as in paper/wrangler.jsonc) -> the workflow it starts, and its inputs.
+// The Gemini writer (paper-gemini.yml) runs once per issue, after the Claude
+// routine's 16:00 run: at 16:45 UTC if Claude's edition for the day is in, else
+// at the 17:30 publish backstop (or 20:30, if 17:30 could not start it). One
+// run per issue keeps it within the Gemini API's free tier.
+const geminiAfterClaude = (env, now) => startGemini(env, now, { needClaude: true });
+const geminiBackstop = (env, now) => startGemini(env, now);
+
+// Cron expression (as in paper/wrangler.jsonc) -> what it starts, in order:
+// [workflow, inputs] pairs, or a function for a job that decides for itself.
 export const SCHEDULE = {
-  "0 11 * * 3,6": ["paper-collect.yml", {}],
-  "30 17,20 * * 3,6": ["paper-publish.yml", {}],
-  "0 10 * * 6": ["paper-follow.yml", { email: "true" }],
+  "0 11 * * 3,6": [["paper-collect.yml", {}]],
+  "45 16 * * 3,6": [geminiAfterClaude],
+  "30 17,20 * * 3,6": [["paper-publish.yml", {}], geminiBackstop],
+  "0 10 * * 6": [["paper-follow.yml", { email: "true" }]],
 };
 
 function reply(status, body) {
@@ -43,12 +52,49 @@ export async function createRequest(env, kind, payload) {
   return id;
 }
 
-/** The cron handler: start the workflow for this trigger. */
+/** The issue a run on `now` belongs to: Saturday (UTC) is the weekly, any other day a midweek update. */
+export function issueFor(now) {
+  return { date: now.toISOString().slice(0, 10), kind: now.getUTCDay() === 6 ? "weekly" : "update" };
+}
+
+/**
+ * Start the Gemini writer for today's issue unless it already started (a
+ * "gemini" row in requests, keyed by the issue) or, with needClaude, unless the
+ * Claude routine's edition is not in yet. Returns what happened, for the log.
+ */
+export async function startGemini(env, now = new Date(), { needClaude = false } = {}) {
+  const issue = issueFor(now);
+  const key = JSON.stringify(issue);
+  if (await env.DB.prepare("SELECT id FROM requests WHERE kind = 'gemini' AND payload = ?1").bind(key).first()) return "already started for this issue";
+  if (needClaude && !(await env.STORE.head(`paper/editions/${issue.date}-${issue.kind}.json`))) return "waiting for Claude's edition";
+  const status = await dispatch(env, "paper-gemini.yml", issue);
+  if (status !== 204) return `not started (${status || "no ACTIONS_TOKEN"})`;
+  await createRequest(env, "gemini", key);
+  return "started";
+}
+
+/**
+ * The cron handler: start what this trigger lists, in order. Each job is on its
+ * own, so a failure in one (say the Gemini writer's check) never stops the next
+ * or the publish before it.
+ */
 export async function scheduled(event, env) {
-  const [workflow, inputs] = SCHEDULE[event.cron] || [];
-  if (!workflow) return console.warn(`no workflow for cron ${event.cron}`);
-  const status = await dispatch(env, workflow, inputs);
-  console.log(`cron ${event.cron}: ${workflow} ${status || "not started (no ACTIONS_TOKEN)"}`);
+  const jobs = SCHEDULE[event.cron];
+  if (!jobs) return console.warn(`no workflow for cron ${event.cron}`);
+  const now = new Date(event.scheduledTime || Date.now());
+  for (const job of jobs) {
+    try {
+      if (typeof job === "function") {
+        console.log(`cron ${event.cron}: ${job.name}: ${await job(env, now)}`);
+      } else {
+        const [workflow, inputs] = job;
+        const status = await dispatch(env, workflow, inputs);
+        console.log(`cron ${event.cron}: ${workflow} ${status || "not started (no ACTIONS_TOKEN)"}`);
+      }
+    } catch (e) {
+      console.error(`cron ${event.cron}: ${typeof job === "function" ? job.name : job[0]} failed: ${e.message}`);
+    }
+  }
 }
 
 /** /api/jobs/* for a bearer role. Returns a Response, or null when the path is not one of these. */

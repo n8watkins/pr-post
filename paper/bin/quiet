@@ -5,7 +5,8 @@
 # of the job. Usage: paper/bin/quiet python3 scripts/collect.py --paper "$WORK"
 set -uo pipefail
 log="${PAPER_LOG:?set PAPER_LOG}"
-name="$(basename "${2:-$1}")"
+# The script's file name, or the module's for `python3 -m pkg.mod ...`.
+if [ "${2:-}" = "-m" ]; then name="${3:-$1}"; else name="$(basename -- "${2:-$1}")"; fi
 { echo "== $(date -u +%FT%TZ) $name"; } >> "$log"
 "$@" >> "$log" 2>&1
 code=$?
