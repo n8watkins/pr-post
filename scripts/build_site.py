@@ -490,9 +490,9 @@ def front_page(edition, people, snaps, written_count):
     obits = obits or '<p class="muted">No deaths reported this week.</p>'
     births = births or '<p class="muted">No births reported this week.</p>'
     q = edition.get("quote")
-    quote = (f'<div class="box"><h3>Quote of the week</h3><div class="quote">{ext(q["url"], esc(chr(8220) + q["text"] + chr(8221)))}</div>'
+    quote = (f'<div class="box"><h2>Quote of the week</h2><div class="quote">{ext(q["url"], esc(chr(8220) + q["text"] + chr(8221)))}</div>'
              f'<div class="cite">{esc(q["by"])}, {esc(q.get("where", ""))}, {esc(q.get("date", ""))}</div></div>') if q else ""
-    side = f'<div class="side"><div class="box"><h3>Obituaries</h3>{obits}</div><div class="box"><h3>Births</h3>{births}</div>{quote}</div>'
+    side = f'<div class="side"><div class="box"><h2>Obituaries</h2>{obits}</div><div class="box"><h2>Births</h2>{births}</div>{quote}</div>'
 
     stories = sorted(edition.get("stories", []), key=lambda s: not by_id.get(edition_who(s), {}).get("starred"))
     story_html = "".join(
