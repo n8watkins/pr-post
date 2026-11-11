@@ -461,6 +461,12 @@ class V2ChecksTest(FixtureCase):
         self.assertEqual(a["report_md"], f"- Ada shipped a thing in [PR 1](https://x/pull/1).\n- Ada fixed [commit 0123456](https://x/commit/{sha}).")
         self.assertEqual(pipeline.normalize_answer({"report_md": "Quiet since Nov 7."}, "update")["report_md"], "Quiet since Nov 7.")
 
+    def test_the_reader_leads_only_when_their_news_clearly_wins(self):
+        answers = {"ada-fixture": {"lead_score": 8}, "sol-fixture": {"lead_score": 8}}
+        self.assertEqual(pipeline.choose_lead(self.p, answers), "ada-fixture")
+        answers["sol-fixture"]["lead_score"] = 10
+        self.assertEqual(pipeline.choose_lead(self.p, answers), "sol-fixture")
+
     def test_the_fallback_uses_only_the_brief(self):
         fb = pipeline.fallback_answer(self.other, "update")
         self.assertTrue(fb["fallback"])

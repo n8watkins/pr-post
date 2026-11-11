@@ -595,10 +595,12 @@ def births_and_obituaries(prep):
 
 
 def choose_lead(prep, answers):
+    """The person whose news leads: the model's lead_score, then the ranked news value. The reader already knows what
+    they shipped, so their own score counts one point less: they lead only when their news clearly beats everyone's."""
     by_id = {p["id"]: p for p in prep["people"]}
     top = lambda pid: max((h["score"] for h in by_id[pid].get("highlights") or []), default=0)
-    return max(answers, key=lambda pid: (max(0, min(10, int(answers[pid].get("lead_score") or 0))), top(pid), by_id[pid]["starred"],
-                                         len(by_id[pid]["items"])))
+    score = lambda pid: max(0, min(10, int(answers[pid].get("lead_score") or 0))) - (1 if by_id[pid]["self"] else 0)
+    return max(answers, key=lambda pid: (score(pid), top(pid), by_id[pid]["starred"], len(by_id[pid]["items"])))
 
 
 def clean_profile_line(line):
