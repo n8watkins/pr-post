@@ -85,7 +85,7 @@ class Email(unittest.TestCase):
 
 
 class EmailRun(unittest.TestCase):
-    """send_email.py end to end against a paper in its own repository, with Resend never reachable."""
+    """send_email.py end to end against a paper in its own repository, with the Worker never reachable."""
 
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
@@ -102,7 +102,7 @@ class EmailRun(unittest.TestCase):
     def run_main(self, *args, env=None):
         out = io.StringIO()
         argv = ["send_email.py", "--paper", str(self.repo), str(self.report), *args]
-        never = mock.Mock(side_effect=AssertionError("tried to contact Resend"))
+        never = mock.Mock(side_effect=AssertionError("tried to contact the Worker"))
         with mock.patch.object(sys, "argv", argv), mock.patch.dict(os.environ, env or {}, clear=False), \
                 mock.patch("urllib.request.urlopen", never), contextlib.redirect_stdout(out):
             send_email.main()
@@ -110,11 +110,11 @@ class EmailRun(unittest.TestCase):
 
     def test_dry_run_checks_everything_and_sends_nothing(self):
         preview = self.repo / "digest.html"
-        out = self.run_main("--dry-run", "--preview", str(preview), env={"RESEND_API_KEY": "re_test_not_a_key"})
+        out = self.run_main("--dry-run", "--preview", str(preview), env={"PR_POST_API": "https://paper.example", "PR_POST_TOKEN": "not-a-real-token-but-long-enough-xx"})
         self.assertIn("Dry run", out)
-        self.assertIn("through Resend (RESEND_API_KEY set)", out)
+        self.assertIn("through the paper's Worker (PR_POST_API and PR_POST_TOKEN set)", out)
         self.assertNotIn("Octo Cat", out)  # subjects name people; dry runs can land in public Actions logs
-        self.assertNotIn("re_test_not_a_key", out)
+        self.assertNotIn("not-a-real-token", out)
         self.assertNotIn("reader@example.com", out)
         page = preview.read_text()
         self.assertIn("The Test Gazette", page)
@@ -128,15 +128,15 @@ class EmailRun(unittest.TestCase):
         with mock.patch.object(sys, "argv", argv), self.assertRaises(SystemExit):
             send_email.main()
 
-    def test_ses_dry_run_and_a_suppressed_recipient(self):
-        text = (self.repo / "watchlist.toml").read_text().replace('to = "reader@example.com"', 'to = "reader@example.com"\nvia = "ses"\nconfiguration_set = "pr-post"')
+    def test_old_email_keys_are_ignored_and_a_suppressed_recipient_stops_it(self):
+        # A watch list from before the Worker sent email still loads; its provider keys do nothing now.
+        text = (self.repo / "watchlist.toml").read_text().replace('to = "reader@example.com"', 'to = "reader@example.com"\nvia = "ses"\nconfiguration_set = "pr-post"\nfrom = "PR Post <onboarding@resend.dev>"')
         (self.repo / "watchlist.toml").write_text(text)
-        out = self.run_main("--dry-run", env={"AWS_ACCESS_KEY_ID": "AKIDEXAMPLE", "AWS_SECRET_ACCESS_KEY": "not-a-secret"})
-        self.assertIn("through Amazon SES (AWS credentials set)", out)
-        self.assertNotIn("AKIDEXAMPLE", out)
+        out = self.run_main("--dry-run", env={"PR_POST_API": "", "PR_POST_TOKEN": ""})
+        self.assertIn("through the paper's Worker (PR_POST_API and PR_POST_TOKEN not set)", out)
         (self.repo / "suppressed.json").write_text('[{"address": "Reader@Example.com", "reason": "Permanent bounce", "at": "2026-11-09T10:00:00Z"}]')
         with self.assertRaises(SystemExit) as stop:
-            self.run_main("--dry-run", env={"AWS_ACCESS_KEY_ID": "AKIDEXAMPLE", "AWS_SECRET_ACCESS_KEY": "not-a-secret"})
+            self.run_main("--dry-run")
         self.assertIn("Permanent bounce on 2026-11-09", str(stop.exception))
 
     def test_dry_run_still_respects_email_being_off(self):

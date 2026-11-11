@@ -1,6 +1,6 @@
 # The owner's paper: build the site from the paper in Cloudflare and publish it
 # behind the Worker's sign-in, then email every new issue of reports as one
-# short digest each, through Amazon SES (docs/email.md).
+# short digest each, through the paper's Worker and mailroom (docs/email.md).
 #
 # Started by the Claude routine when its reports are in (store.py publish), as
 # a backstop by the Worker's cron (Wed + Sat 17:30 and 20:30 UTC), after each
@@ -27,8 +27,6 @@ concurrency:
 env:
   PR_POST_API: ${{ secrets.PR_POST_API }}
   PR_POST_TOKEN: ${{ secrets.JOBS_TOKEN }}
-  # "worker" sends through the paper's Worker and mailroom; empty keeps [email] via (docs/email.md).
-  EMAIL_VIA: ${{ vars.EMAIL_VIA }}
 
 jobs:
   site:
@@ -56,11 +54,8 @@ jobs:
     needs: site
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # The SES role trusts only jobs in this environment, which only main may use.
-    environment: email
     permissions:
       contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -68,13 +63,6 @@ jobs:
       - uses: ./.github/actions/paper
       - name: Pull the paper
         run: python3 scripts/store.py pull "$WORK"
-      - name: AWS credentials for SES (one hour, send-only)
-        if: vars.AWS_SES_ROLE_ARN != ''
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ vars.AWS_SES_ROLE_ARN }}
-          aws-region: us-east-1
-          role-duration-seconds: 900
       - name: Email new issues
         env:
           DRY_RUN: ${{ inputs.dry_run && 'true' || '' }}

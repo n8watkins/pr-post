@@ -98,8 +98,8 @@ export async function recordEmailEvent(env, event) {
   if (!type || !event.recipient || !event.eventId) return { stored: false };
   const kind = type === "Bounce" ? (event.bounceType === "hard" ? "Permanent" : "Transient") : "";
   const detail = [kind, event.smtpStatus, event.reason].filter(Boolean).join(" ").slice(0, 300);
-  const r = await env.DB.prepare(`INSERT INTO email_events (at, type, address, detail, message_id, sns_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-    ON CONFLICT (sns_id, address) DO NOTHING`)
+  const r = await env.DB.prepare(`INSERT INTO email_events (at, type, address, detail, message_id, event_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+    ON CONFLICT (event_id, address) DO NOTHING`)
     .bind(event.occurredAt || new Date().toISOString(), type, String(event.recipient).toLowerCase().slice(0, 254), detail, String(event.messageId || ""), String(event.eventId))
     .run();
   console.log(`email event: ${event.type} stored ${r.meta.changes ? "now" : "already"}`);

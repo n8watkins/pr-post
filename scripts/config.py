@@ -43,14 +43,10 @@ WRITER_DEFAULTS = {
     "kind": "none",       # "none", "claude-routine" or "gemini"; only documents who writes, nothing calls an AI here
     "reader": "a friend of theirs, technical but not inside their projects",
 }
+# The paper's Worker sends every email and picks the sender (docs/email.md). Old
+# keys from earlier versions (from, via, region, configuration_set) are ignored.
 EMAIL_DEFAULTS = {
     "to": "",
-    "from": "PR Post <onboarding@resend.dev>",
-    # "worker" (the paper's Worker sends it, PR_POST_API and PR_POST_TOKEN), "ses" (Amazon SES,
-    # AWS credentials in the environment) or "resend" (RESEND_API_KEY); EMAIL_VIA overrides it.
-    "via": "resend",
-    "region": "us-east-1",        # SES only: the region of the verified sender identity
-    "configuration_set": "",      # SES only: the configuration set that reports bounces and complaints
 }
 DELIVERY_DEFAULTS = {"email": False}
 # [follow]: "Who to follow" suggestions (follow.py, docs/who-to-follow.md).
@@ -246,12 +242,6 @@ def parse(text):
             raise ConfigError(f'"{p["id"]}" is listed twice')
         seen.add(p["id"])
     email = {**EMAIL_DEFAULTS, **(raw.get("email") or {})}
-    if email["via"] not in ("worker", "ses", "resend"):
-        raise ConfigError('[email] via must be "worker", "ses" or "resend"')
-    if not re.fullmatch(r"[a-z]{2}(-[a-z]+)+-\d", email["region"]):
-        raise ConfigError('[email] region must be an AWS region such as "us-east-1"')
-    if email["configuration_set"] and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", email["configuration_set"]):
-        raise ConfigError("[email] configuration_set must be letters, digits, - and _")
     return {
         "site": site,
         "writer": writer,

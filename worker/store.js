@@ -10,7 +10,7 @@
 //
 // D1 holds structured data: the watch list (people, settings), profiles, the
 // Who to follow state, the one-click action log, the reports already emailed
-// and SES's bounces and complaints. The client turns them back into
+// and the bounces and complaints mailroom reports. The client turns them back into
 // watchlist.toml, profiles/<id>.md, follow/state.json, follow/actions.jsonl,
 // emailed.json and suppressed.json, so the engine's scripts work on a plain
 // folder.

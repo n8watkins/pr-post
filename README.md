@@ -66,10 +66,8 @@ base_path = ""                      # e.g. "/pr-post"; the Pages workflow fills 
 kind = "none"                       # "none", "claude-routine" or "gemini" (documentation only)
 reader = "a friend of theirs, technical but not inside their projects"   # who written reports are for
 
-[email]                             # only for written reports sent by email (docs/email.md)
+[email]                             # only for written reports sent by email; the paper's Worker sends them (docs/email.md)
 to = ""
-from = "PR Post <onboarding@resend.dev>"
-via = "resend"                      # "ses" (Amazon SES) or "resend"
 
 [delivery]
 email = false
@@ -100,8 +98,7 @@ To get suggestions instead, turn on `[follow]`: `scripts/follow.py` finds builde
 | `PR_POST_PAPER` | The paper folder when `--paper` is not given (the workflow sets it from the repository variable, default `demo`) |
 | `GITHUB_TOKEN` | GitHub API access; Actions provides one automatically |
 | `PR_POST_SITE_URL`, `PR_POST_BASE_PATH` | Override `[site] url` and `base_path`; the Pages workflow sets them |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Only for sending email through Amazon SES; in Actions they come from GitHub OIDC, so no key is stored ([docs/email.md](docs/email.md)) |
-| `RESEND_API_KEY` | Only for sending email through Resend (`--dry-run` checks everything without sending) |
+| `PR_POST_API`, `PR_POST_TOKEN` | The paper Worker's address and its `JOBS_TOKEN`; the email scripts hand each email to the Worker, which sends it ([docs/email.md](docs/email.md)) |
 | `ACTION_SIGNING_KEY` | Only for one-click buttons in the Who to follow email (`act.py`, the Worker's `/act/` links) |
 
 ## feed.json: show who you follow on your own site
@@ -145,7 +142,7 @@ See **[docs/writers.md](docs/writers.md)**.
 | `scripts/config.py` | Loads and validates `watchlist.toml` |
 | `scripts/send_email.py` | Optional short email digest of written reports: a TL;DR, one line per person, a button to the web edition |
 | `scripts/send_follow.py` | Optional separate "Who to follow" email with the top five picks |
-| `scripts/ses.py` | Sends through Amazon SES (SigV4, no SDK); bounces and complaints come back through `worker/sns.js` |
+| `worker/email.js` | Sends the jobs' emails through mailroom or a Cloudflare Email Service binding; bounces come back through `worker/main.js` |
 | `scripts/brief.py` | A few-kilobyte brief per person for an AI writer, so it reads far fewer tokens than `data/` |
 | `scripts/act.py`, `scripts/act_lib.py` | One-click Follow and Add links from that email: signed, single use, logged |
 | `scripts/digest.py`, `scripts/email_lib.py` | Shared by the emails and the site's issue pages |

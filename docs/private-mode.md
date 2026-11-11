@@ -146,7 +146,7 @@ steps:
 
 In `wrangler.jsonc` set `"main": "engine/worker/index.js"` and keep `"assets": { "directory": "./dist" }`, add `/engine/` to `.gitignore` (anchored, so it does not also hide `.github/actions/engine/`), and pass the repository at deploy time with `--var GITHUB_REPO:${{ github.repository }}` so nothing depends on the repository's name.
 `send_email.py` links each report to the repository that holds it, so set `[links] repo` to your private repository's address.
-To test the email without sending it, run `send_email.py --dry-run --preview digest.html`: it runs every check a real send would and writes the HTML, but never contacts Resend.
+To test the email without sending it, run `send_email.py --dry-run --preview digest.html`: it runs every check a real send would and writes the HTML, but never contacts the Worker.
 
 ## Secrets
 

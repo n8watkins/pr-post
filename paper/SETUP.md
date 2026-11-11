@@ -15,26 +15,12 @@ Values never go in this repository or in a chat: secrets go through `pass-env` (
 | `FOLLOW_GITHUB_TOKEN` | Secret | Actions | Owner (step C1) |
 | `CLOUDFLARE_API_TOKEN` | Secret | Actions | Owner, optional (step C3) |
 | `PR_POST_API` | Secret (so run logs mask it) | Actions, and the routine's environment | The Worker's address |
-| `AWS_SES_ROLE_ARN` | Variable | Actions | Agent, from the SES stack's outputs |
-| `SES_TOPIC_ARN` | Variable | Worker (`wrangler.jsonc` or `--var`) | Agent, from the SES stack's outputs |
 | `PAPER_DEPLOY_LIVE` | Variable | Actions | `true` once the live Worker runs this code |
 
-The GitHub environment `email` (limited to `main`) holds the jobs that send; the SES role trusts nothing else.
+Email needs no secret: the jobs hand each email to the Worker with `JOBS_TOKEN`, and the Worker sends it through its `MAILROOM` service binding to [mailroom](https://github.com/n8watkins/mailroom), from `prpost@n8builds.dev` ([docs/email.md](../docs/email.md)).
+Bounces and complaints come back to the live Worker's `EmailEvents` entrypoint and show on the People page.
 
 ## Owner steps
-
-### A. Amazon SES
-
-1. Sign in at console.aws.amazon.com and pick the region **US East (N. Virginia) us-east-1**.
-2. IAM, Identity providers: note whether `token.actions.githubusercontent.com` is listed.
-3. CloudFormation, Create stack, With new resources, **Upload a template file**: [`aws/ses.yml`](aws/ses.yml).
-   Stack name `pr-post-ses`.
-   Parameters: `OwnerEmail` your address; `EventsEndpoint` the Worker's address followed by `/api/ses/events`; `CreateGitHubOidcProvider` `false` if step 2 found the provider, otherwise `true`; keep the other defaults.
-   Tick the IAM acknowledgement and submit; wait for `CREATE_COMPLETE`.
-4. Copy the stack's Outputs into the chat (none are secret); an agent adds the DNS records and sets the variables.
-5. Click the verification link SES emails you.
-6. Optional: SES, Account dashboard, **Request production access** (Transactional; the use case text is in the plan).
-   The sandbox already delivers to your own verified address.
 
 ### C. GitHub tokens
 
@@ -59,7 +45,7 @@ Its prompt:
 
 1. Cloudflare dashboard, Zero Trust (Free plan), Settings, Authentication: **One-time PIN** on.
 2. Access, Applications, Add, **Self-hosted**: name `PR Post`, the Worker's hostname, policy **Allow** for your email address.
-3. A second Self-hosted application on the same hostname with paths `act`, `api/jobs`, `api/paper`, `api/site` and `api/ses`, policy **Bypass**, Everyone; the Worker checks its own tokens, signatures and signed links there.
+3. A second Self-hosted application on the same hostname with paths `act`, `api/jobs`, `api/paper`, `api/site` and `api/email`, policy **Bypass**, Everyone; the Worker checks its own tokens, signatures and signed links there.
 4. Copy the `PR Post` application's **AUD tag** and your team domain into the chat; an agent sets `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` and `ALLOWED_EMAILS`, checks the login, then deletes `SITE_PASSWORD`.
 
 ## Running things by hand

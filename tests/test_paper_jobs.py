@@ -83,7 +83,7 @@ class Unsent(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.paper = write_paper(Path(tmp.name) / "paper", 'mode = "private"\nurl = "https://paper.example"')
         with open(self.paper / "watchlist.toml", "a") as f:
-            f.write('\n[email]\nto = "reader@example.com"\nvia = "ses"\n\n[delivery]\nemail = true\n')
+            f.write('\n[email]\nto = "reader@example.com"\n\n[delivery]\nemail = true\n')
         self.today = dt.date.today()
 
     def report(self, pid, days_ago, kind="weekly"):
@@ -95,7 +95,7 @@ class Unsent(unittest.TestCase):
     def main(self, *args):
         out = io.StringIO()
         with mock.patch.object(sys, "argv", ["send_email.py", "--paper", str(self.paper), *args]), \
-                mock.patch.dict(os.environ, {"AWS_ACCESS_KEY_ID": "AKID", "AWS_SECRET_ACCESS_KEY": "s"}), contextlib.redirect_stdout(out):
+                mock.patch.dict(os.environ, {"PR_POST_API": "https://paper.example", "PR_POST_TOKEN": "j" * 40}), contextlib.redirect_stdout(out):
             send_email.main()
         return out.getvalue()
 
@@ -121,7 +121,7 @@ class Unsent(unittest.TestCase):
         with mock.patch("email_lib.deliver") as deliver:
             out = self.main("--unsent", "--dry-run")
         deliver.assert_not_called()
-        self.assertIn("through Amazon SES", out)
+        self.assertIn("through the paper's Worker", out)
         self.assertEqual(json.loads((self.paper / "emailed.json").read_text()), [])
 
     def test_needs_the_emailed_list(self):

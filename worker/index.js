@@ -9,12 +9,10 @@
 // /api/watchlist lets the settings page save the watch list: into D1 when the
 // Worker has the paper's storage (worker/store.js), else into watchlist.toml
 // on GitHub.
-// Two exceptions to sign-in:
+// Exceptions to sign-in:
 //   /act/<token>: the one-click links in the Who to follow email
 //     (scripts/act_lib.py). The signed, expiring token is the credential, a GET
 //     only shows a page, and only that page's POST acts.
-//   /api/ses/events: Amazon SES bounce and complaint notices from Amazon SNS,
-//     each checked against its SNS signature and topic (worker/sns.js).
 //   /api/paper/* and /api/site/* with "Authorization: Bearer <token>": the jobs
 //     (JOBS_TOKEN) and the writer (WRITER_TOKEN) read and write the paper's
 //     storage, each within its own lane (worker/store.js).
@@ -25,7 +23,6 @@
 
 import { decodeJwt, checkClaims, validatePeople, replacePeople, realm, verifyAction, signAction, UNDO, timingSafeEqual, bearerRole } from "./lib.js";
 import { handleStore, serveSite, saveActivePeople, actionUsed, serveOwnerFile } from "./store.js";
-import { handleSesEvents } from "./sns.js";
 import { handleJobs, scheduled, dispatch, createRequest } from "./jobs.js";
 import { handlePeople } from "./people.js";
 import { handleEmailSend } from "./email.js";
@@ -296,7 +293,6 @@ export default {
     const path = new URL(request.url).pathname;
     if (path === "/act" || path.startsWith("/act/")) return handleAct(request, env, new URL(request.url));
     const url = new URL(request.url);
-    if (url.pathname === "/api/ses/events") return withHeaders(await handleSesEvents(request, env));
     const machine = bearerRole(request, env);
     if (machine) {
       // A bearer token is only ever for the storage API; a wrong one is refused outright.

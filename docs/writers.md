@@ -110,8 +110,8 @@ This is how the demo runs.
 
 ## Email digests
 
-`scripts/send_email.py` turns one or more reports into a single HTML email through [Resend](https://resend.com).
-Set `[email] to` and `from`, set `email = true` under `[delivery]`, and run it with `RESEND_API_KEY` in the environment:
+`scripts/send_email.py` turns one or more reports into a single HTML email, which the paper's Worker sends ([email.md](email.md)).
+Set `[email] to`, set `email = true` under `[delivery]`, and run it with `PR_POST_API` and `PR_POST_TOKEN` (the Worker's `JOBS_TOKEN`) in the environment:
 
 ```sh
 python3 scripts/send_email.py --paper paper paper/reports/<id>/<date>-weekly.md
@@ -119,5 +119,5 @@ python3 scripts/send_email.py --paper paper <report.md> --preview out.html   # r
 python3 scripts/send_email.py --paper paper <report.md> --dry-run            # every check, nothing sent
 ```
 
-`--dry-run` checks that email is on, that `[email] to` is set and whether `RESEND_API_KEY` is present, prints the subject, and stops before contacting Resend; combine it with `--preview` to keep the HTML.
-It never prints the recipient or the key.
+`--dry-run` checks that email is on, that `[email] to` is set and whether the Worker settings are present, and stops before contacting the Worker; combine it with `--preview` to keep the HTML.
+It never prints the recipient, the subject or the token.
