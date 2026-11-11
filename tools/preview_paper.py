@@ -1,12 +1,13 @@
-"""PREVIEW ONLY: build a synthetic private paper with a Who to follow run, for UI previews.
+"""Build a synthetic private paper with a Who to follow run, to look at the site's UI.
 
     python3 tools/preview_paper.py /tmp/prpost-preview/paper /tmp/prpost-preview/dist
     python3 -m http.server -d /tmp/prpost-preview/dist 8737
     # open http://localhost:8737/ and http://localhost:8737/follow/picks/
 
 Every person here is made up; avatars are local SVG initials served from the
-same folder (so the server must run on PORT, default 8737). Add to PR Post
-shows its "nothing is saved" note here, because there is no Worker.
+same folder (so the server must run on PORT, default 8737). The paper is kept
+"in Cloudflare", so Add to PR Post and the People page call /api/people: a plain
+file server answers 501 there and the page says nothing was added.
 """
 
 import datetime as dt
@@ -47,7 +48,7 @@ for f in ("octo.json",):
     d["github"]["profile"]["avatar"] = AV.format("octo")
     (paper / "data" / f).write_text(json.dumps(d))
 wl = paper / "watchlist.toml"
-wl.write_text(wl.read_text().replace('The Test Gazette', 'The Pull Request Post').replace('Testing, testing', 'All the commits fit to print') + FOLLOW_TOML.replace("picks = 2", "picks = 8") + '\n[links]\nrepo = "https://github.com/example/my-paper"\n[follow.thresholds]\nfollow = 60\nmaybe = 30\n')
+wl.write_text(wl.read_text().replace('The Test Gazette', 'The Pull Request Post').replace('Testing, testing', 'All the commits fit to print') + FOLLOW_TOML.replace("picks = 2", "picks = 3") + '\n[links]\nrepo = "https://github.com/example/my-paper"\n[follow.thresholds]\nfollow = 60\nmaybe = 30\n')
 
 cfg = config.load(paper)
 (paper / "follow" / "people").mkdir(parents=True, exist_ok=True)
@@ -69,7 +70,7 @@ for i, (login, name, bio, top, stars, lang, topics) in enumerate(PEOPLE):
     cands.append({"login": login, "name": name, "avatar": AV.format(login), "profile": rep["profile"], "researched": rep["researched"], **s,
                   "found": [{"text": "Followed by Octo Cat", "url": "https://github.com/octo?tab=following"}] if i % 3 == 0 else []})
 cands.sort(key=lambda c: -c["score"])
-latest = {"date": TODAY.isoformat(), "picks": [c["login"] for c in cands if c["recommendation"] != "Skip"][:8],
+latest = {"date": TODAY.isoformat(), "picks": [c["login"] for c in cands if c["recommendation"] != "Skip"][:3],
           "stack": ["TypeScript", "Cloudflare Workers"], "candidates": cands}
 (paper / "follow" / "latest.json").write_text(json.dumps(latest))
 import stats  # noqa: E402

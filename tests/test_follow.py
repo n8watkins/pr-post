@@ -248,6 +248,48 @@ class Output(unittest.TestCase):
         self.assertIn("gh workflow run follow-add.yml --repo me-builder/my-paper -f github=jane", page)
         self.assertNotIn("jane@example.com", page)
 
+    def test_a_paper_kept_in_git_copies_the_add_command(self):
+        out = Path(self.tmp.name) / "dist"
+        build_site.build(self.paper, out)
+        page = (out / "follow" / "index.html").read_text()
+        cmd = "gh workflow run follow-add.yml --repo me-builder/my-paper -f github=jane"
+        self.assertIn(f'data-copy="{cmd}"', page)
+        self.assertNotIn("data-draft=", page)
+        self.assertIn("Open GitHub profile", page)
+        self.assertIn('href="/follow/picks/"', page)
+        self.assertIn('<script src="/assets/follow.js" defer></script>', page)
+        picks = (out / "follow" / "picks" / "index.html").read_text()
+        data = json.loads(re.search(r'<script type="application/json" id="picks-data">(.*?)</script>', picks, re.S).group(1))
+        self.assertEqual([c["login"] for c in data["cards"]], ["jane"])
+        self.assertEqual(data["cards"][0]["cmd"], cmd)
+        self.assertNotIn("data-api=", picks)
+        self.assertIn("copy the command that adds them", picks)
+
+    def test_a_paper_kept_in_cloudflare_drafts_through_the_people_page(self):
+        wl = self.paper / "watchlist.toml"
+        wl.write_text(wl.read_text().replace('mode = "private"', 'mode = "private"\nstorage = "cloudflare"', 1))
+        out = Path(self.tmp.name) / "dist"
+        build_site.build(self.paper, out)
+        page = (out / "follow" / "index.html").read_text()
+        self.assertIn('data-draft="jane" data-api="/api/people/drafts"', page)
+        self.assertNotIn("data-copy=", page)
+        self.assertNotIn("gh workflow run follow-add.yml", page)  # the command is not needed here
+        picks = (out / "follow" / "picks" / "index.html").read_text()
+        self.assertIn('data-api="/api/people/drafts" data-people="/people/"', picks)
+        data = json.loads(re.search(r'<script type="application/json" id="picks-data">(.*?)</script>', picks, re.S).group(1))
+        self.assertNotIn("cmd", data["cards"][0])
+        self.assertEqual(data["picks"], 1)
+
+    def test_the_deck_deals_picks_then_maybes_and_never_skips(self):
+        latest = json.loads((self.paper / "follow" / "latest.json").read_text())
+        jane = latest["candidates"][0]
+        maybe = {**jane, "login": "may", "recommendation": "Maybe"}
+        skip = {**jane, "login": "sam", "recommendation": "Skip"}
+        latest["candidates"] = [skip, maybe, jane]
+        picks, rest = build_site.deck_order(latest)
+        self.assertEqual([c["login"] for c in picks], ["jane"])
+        self.assertEqual([c["login"] for c in rest], ["may"])
+
     def test_public_site_leaves_it_out(self):
         wl = self.paper / "watchlist.toml"
         wl.write_text(wl.read_text().replace('mode = "private"', 'mode = "public"'))

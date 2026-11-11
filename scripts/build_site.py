@@ -36,6 +36,8 @@ FONTS = ("https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,9
 ARROW_MIN_DAYS = 4  # compare against a snapshot at least this old
 FACTS_SIDE_MAX = 6  # births and obituaries the facts edition prints before "plus N more"
 REPO_URL = "https://github.com/n8watkins/pr-post"
+MENU_ICON = ('<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">'
+             '<path d="M4 7h16M4 12h16M4 17h16"/></svg>')
 FAVICON = ("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2317171a'/%3E"
            "%3Ctext x='16' y='23' font-family='Georgia,serif' font-weight='900' font-size='20' text-anchor='middle' fill='%23f8f7f3'%3EP%3C/text%3E%3C/svg%3E")
 
@@ -45,6 +47,14 @@ PAPER = SITE["title"]
 BASE = ""
 SHOW_PRIVATE = False
 HAS_FOLLOW = False  # set by build() when there is a "Who to follow" page
+
+
+def people_api():
+    """True when the paper is kept in Cloudflare, so the Worker's /api/people (and its drafts) exists."""
+    return SITE["mode"] == "private" and SITE["storage"] == "cloudflare"
+
+
+DRAFTS_API = "/api/people/drafts"
 
 
 def configure(site):
@@ -355,14 +365,14 @@ def rail(people, snaps, current=None, page=None):
     pages = [("front", "/", "Front page"), ("archive", "/archive/", "Back issues")]
     if HAS_FOLLOW:
         pages.append(("follow", "/follow/", "Who to follow"))
-    if SITE["mode"] == "private" and SITE["storage"] == "cloudflare":
+    if people_api():
         pages.append(("people", "/people/", "People"))
     elif SITE["mode"] == "private":
         pages.append(("settings", "/settings/", "People and settings"))
     nav = "".join(f'<a href="{u(href)}"{" aria-current=\"page\"" if page == key else ""}>{label}</a>' for key, href, label in pages)
     legend = ('<span class="legend"><span class="sw pub"></span>public</span> &nbsp; <span class="legend"><span class="sw priv"></span>private</span><br>'
               "Numbers are this week's contributions." if SHOW_PRIVATE else "Numbers are this week's public contributions.")
-    return f"""<aside class="rail" id="rail" aria-label="People">
+    return f"""<aside class="rail" id="rail" aria-label="Sections and people">
   <a class="rail-brand" href="{u("/")}">{esc(PAPER)}</a>
   <nav class="rail-nav">{nav}</nav>
   <input class="rail-search" id="rail-search" type="search" placeholder="Find a person  ( / )" aria-label="Find a person" autocomplete="off">
@@ -373,7 +383,7 @@ def rail(people, snaps, current=None, page=None):
 </aside>"""
 
 
-def layout(title, body, people, snaps, current=None, page=None, description=None):
+def layout(title, body, people, snaps, current=None, page=None, description=None, scripts=()):
     robots = '<meta name="robots" content="noindex,nofollow">' if SITE["mode"] == "private" else ""
     desc = description or f"{PAPER}: what {len(people)} builders shipped this week, from their public GitHub and YouTube activity."
     private_note = " · private work appears only as a count" if SHOW_PRIVATE else ""
@@ -395,14 +405,14 @@ def layout(title, body, people, snaps, current=None, page=None, description=None
 <div class="shell">
 {rail(people, snaps, current, page)}
 <div>
-  <header class="topbar"><button id="rail-toggle" type="button" aria-controls="rail" aria-expanded="false">People</button><a href="{u("/")}">{esc(PAPER)}</a></header>
+  <header class="topbar"><button id="rail-toggle" type="button" aria-controls="rail" aria-expanded="false">{MENU_ICON}<span class="menu-label">Menu</span></button>{"" if page == "front" else f'<a href="{u("/")}">{esc(PAPER)}</a>'}</header>
   <main class="main">
 {body}
 <footer class="colophon">{esc(PAPER)} · built from public GitHub and YouTube activity{private_note} · <a href="{u("/feed.json")}">feed.json</a> · made with <a href="{REPO_URL}">pr-post</a></footer>
   </main>
 </div>
 </div>
-<script src="{u("/assets/app.js")}" defer></script>
+<script src="{u("/assets/app.js")}" defer></script>{"".join(f'<script src="{u("/assets/" + s)}" defer></script>' for s in scripts)}
 </body></html>
 """
 
@@ -429,10 +439,8 @@ def ticker(people, snaps):
         else:
             move = '<span class="muted">new listing</span>'
         items.append(f'<a href="{u("/p/" + esc(p["id"]) + "/")}"><b>{sym}</b> {n(total)} {move}</a>')
-    # Two copies so the crawl loops without a gap and the strip is full at rest.
-    track = "".join(items)
-    return (f'<div class="ticker" aria-label="Commit Index: contributions this week"><div class="ticker-track">'
-            f'{track}<span aria-hidden="true" style="display:contents">{track}</span></div></div>')
+    # A still strip: nothing on the page moves on its own. Phones skip it; the box scores carry the same numbers.
+    return f'<div class="ticker" role="group" aria-label="Commit Index: contributions this week">{"".join(items)}</div>' if items else ""
 
 
 def front_page(edition, people, snaps, written_count):
@@ -812,7 +820,7 @@ def settings_page(people):
 <ul class="set-list" id="set-list"></ul>
 <div class="sect">Follow someone new</div>
 <form class="add-form" id="add-form" autocomplete="off">
-  <label>GitHub username<input name="github" id="add-github" required placeholder="e.g. simonw"></label>
+  <label>GitHub username<input name="github" id="add-github" required placeholder="e.g. octocat"></label>
   <label>What you call them<input name="name" id="add-name" placeholder="e.g. Simon Willison"></label>
   <label class="wide">Orgs where their work lands (optional, comma separated)<input name="orgs" id="add-orgs" placeholder="e.g. datasette"></label>
   <label class="wide">Known for (optional)<input name="known_for" id="add-known" placeholder="One line on who they are"></label>
@@ -829,7 +837,7 @@ def people_page():
 <div id="people-app" data-api="/api/people" aria-live="polite"><p class="muted">Loading the watch list…</p></div>
 <div class="sect">Follow someone new</div>
 <form class="add-form" id="people-add" autocomplete="off">
-  <label class="wide">GitHub username or profile link<input name="github" id="people-add-github" required autocomplete="off" placeholder="e.g. simonw"></label>
+  <label class="wide">GitHub username or profile link<input name="github" id="people-add-github" required autocomplete="off" placeholder="e.g. octocat"></label>
   <div class="wide"><button class="btn solid" type="submit">Research and draft them</button>
   <span class="status" id="people-add-status" role="status"></span></div>
 </form>
@@ -839,6 +847,13 @@ def people_page():
 # ---------- who to follow ----------
 
 PART_LABELS = {"stack": "Stack overlap", "activity": "Activity", "quality": "Quality", "relevance": "Your interests", "network": "Your network"}
+
+
+def add_button(login, cmd):
+    """Add to PR Post: a draft on the People page when the Worker is there, else a copied command."""
+    if people_api():
+        return f'<button class="btn solid" type="button" data-draft="{esc(login)}" data-api="{DRAFTS_API}">Add to PR Post</button>'
+    return f'<button class="btn solid" type="button" data-copy="{esc(cmd)}">Add to PR Post</button>'
 
 
 def follow_card(c, report, repo_url):
@@ -861,19 +876,25 @@ def follow_card(c, report, repo_url):
   <div class="fc-score fc-{esc(rec)}" title="Fit score out of 100"><b class="num">{c["score"]}</b><span>{esc(c["recommendation"])}</span></div></div>
   <p class="fc-why">{esc(c["why_follow"])}</p>
   <div class="fc-parts">{parts}</div>
-  <div class="fc-actions"><button class="btn solid" type="button" data-copy="{esc(cmd)}">Add to PR Post</button>{ext(c["profile"], "Open GitHub profile", "btn")}<span class="fc-copied label" role="status"></span></div>
+  <div class="fc-actions">{add_button(login, cmd)}{ext(c["profile"], "Open GitHub profile", "btn")}<span class="fc-status" role="status"></span></div>
   <details class="fc-report"><summary>Mini report</summary>
     <div class="prose">{render_md(follow_lib.render_md(report), demote=1)}</div>
     {f'<div class="sect">How they turned up</div><ul class="fc-found">{found}</ul>' if found else ""}
-    <p class="fc-cmd">Add to PR Post drafts their watch-list entry and profile on a branch for you to review: <code>{esc(cmd)}</code>{add_link}.</p>
+    {"" if people_api() else f'<p class="fc-cmd">Add to PR Post drafts their watch-list entry and profile on a branch for you to review: <code>{esc(cmd)}</code>{add_link}.</p>'}
   </details>
 </article>"""
 
 
-def follow_page(latest, reports, repo_url):
+def deck_order(latest):
+    """Who the picks deck deals: this week's picks first, then the other Follow and Maybe candidates."""
     by_login = {c["login"]: c for c in latest["candidates"]}
     picks = [by_login[x] for x in latest.get("picks", []) if x in by_login]
     rest = [c for c in latest["candidates"] if c["login"] not in latest.get("picks", []) and c["recommendation"] != "Skip"]
+    return picks, rest
+
+
+def follow_page(latest, reports, repo_url):
+    picks, rest = deck_order(latest)
     skipped = [c for c in latest["candidates"] if c["login"] not in latest.get("picks", []) and c["recommendation"] == "Skip"]
     card = lambda c: follow_card(c, reports[c["login"].lower()], repo_url)
     picks_html = "".join(card(c) for c in picks) or '<p class="muted">No new picks this week: everyone worth suggesting was suggested in the last few weeks.</p>'
@@ -886,45 +907,53 @@ def follow_page(latest, reports, repo_url):
         for c in picks + rest + skipped
     )
     toc_html = f'<nav class="toc" aria-label="Everyone on this page"><div class="sect">On this page</div><ol>{toc_items}</ol></nav>' if toc_items else ""
+    cta = f'<p class="picks-cta"><a class="btn solid" href="{u("/follow/picks/")}">Swipe through this week\'s picks</a></p>' if picks or rest else ""
     return f"""<div class="runhead"><span>{esc(PAPER)} · Who to follow</span><span>Updated {day_short(latest["date"])}</span></div>
+<div class="follow-intro">
 <h1 class="page-hed">Who to follow</h1>
 <p class="page-sub">Builders you do not follow yet, found through the people you read, the repos you build on and projects like yours. Each has a one-time mini report from public sources; every fact links to where it came from.</p>
-<p class="picks-cta"><a class="btn solid" href="{u("/follow/picks/")}">Swipe through this week's picks</a></p>
+{cta}
+</div>
 {toc_html}
 <div class="sect">This week's picks</div>
 <div class="fgrid">{picks_html}</div>
 {rest_html}
 {skip_html}
-<p class="facts-note">The fit score adds up five parts: how much of your stack they use ({esc(stack)}), how active they have been over 12 weeks, the quality and reach of their work, how many of your interests their work touches, and whether the builders you already read follow or work with them. Weights and thresholds live under [follow] in watchlist.toml. Nothing here follows anyone for you: Follow on GitHub only opens their profile.</p>"""
+<p class="facts-note">The fit score adds up five parts: how much of your stack they use ({esc(stack)}), how active they have been over 12 weeks, the quality and reach of their work, how many of your interests their work touches, and whether the builders you already read follow or work with them. Weights and thresholds live under [follow] in watchlist.toml. Nothing here follows anyone for you: Open GitHub profile only opens their page on GitHub.</p>"""
 
 
-def follow_picks_page(latest, reports):
-    """This week's picks one card at a time (PREVIEW): app.js deals the cards from the JSON below.
+def follow_picks_page(latest, reports, repo_url):
+    """This week's picks, then the Maybes, one card at a time; follow.js deals them from the JSON below.
 
-    Add calls the People page's draft endpoint (POST /api/people/drafts), the same path as
-    "Research and draft them"; a static preview without the Worker shows that it saved nothing.
+    On a paper kept in Cloudflare, Add posts to the People page's drafts endpoint (the same path as
+    "Research and draft them"), so the person waits there as a draft. Elsewhere it copies the command.
     """
-    by_login = {c["login"]: c for c in latest["candidates"]}
-    order = [by_login[x] for x in latest.get("picks", []) if x in by_login]
-    order += [c for c in latest["candidates"] if c not in order and c["recommendation"] != "Skip"]
+    picks, rest = deck_order(latest)
+    api = people_api()
     cards = []
-    for c in order:
+    for c in picks + rest:
         r = reports[c["login"].lower()]
         top = max(r.get("builds") or [{}], key=lambda b: b.get("stars", 0))
         avatar = c.get("avatar") or r.get("avatar")
-        cards.append({
+        card = {
             "login": c["login"], "name": c["name"], "profile": safe_url(c["profile"]),
             "avatar": safe_url(avatar) if avatar and config.is_http_url(avatar) else "",
             "score": c["score"], "rec": c["recommendation"], "why": c["why_follow"],
             "stars": r["standing"]["stars"], "followers": r["standing"]["followers"],
-            "active": r["activity"]["last_12w"], "trend": r["activity"]["trend"],
-            "top": {"repo": top.get("repo", ""), "stars": top.get("stars", 0)} if top else None,
-        })
-    data = json.dumps({"week": latest["date"], "cards": cards}, ensure_ascii=False).replace("</", "<\\/")
+            "active": r["activity"]["last_12w"],
+            "top": {"repo": top["repo"], "stars": top.get("stars", 0)} if top.get("repo") else None,
+        }
+        if not api:
+            card["cmd"] = follow_lib.add_command(repo_url, c["login"])
+        cards.append(card)
+    data = json.dumps({"week": latest["date"], "picks": len(picks), "cards": cards}, ensure_ascii=False).replace("</", "<\\/")
+    attrs = f'data-api="{DRAFTS_API}" data-people="{u("/people/")}"' if api else ""
+    keys = '<span class="picks-keys">Keys: right arrow adds, left arrow skips, O opens their GitHub profile, Z goes back.</span>'
+    how = "add them to the paper as a draft, or skip them for this week" if api else "copy the command that adds them, or skip them for this week"
     return f"""<div class="runhead"><span>{esc(PAPER)} · <a href="{u("/follow/")}">Who to follow</a></span><span>Week of {day_short(latest["date"])}</span></div>
-<h1 class="page-hed">This week's picks</h1>
-<p class="page-sub picks-sub">One at a time: open their GitHub, then add them to the paper or skip. <span class="picks-keys">Keys: right arrow adds, left arrow skips, O opens GitHub.</span></p>
-<div id="picks-app" data-api="/api/people/drafts" data-people="{u("/people/")}" data-all="{u("/follow/")}" aria-live="polite"><noscript><p class="muted">This page needs JavaScript; <a href="{u("/follow/")}">the full list</a> works without it.</p></noscript></div>
+<h1 class="page-hed picks-hed">This week's picks</h1>
+<p class="page-sub picks-sub">One at a time, then the maybes: {how}. {keys}</p>
+<div id="picks-app" {attrs} data-all="{u("/follow/")}"><noscript><p class="muted">This page needs JavaScript; <a href="{u("/follow/")}">the full list</a> works without it.</p></noscript></div>
 <script type="application/json" id="picks-data">{data}</script>"""
 
 
@@ -982,11 +1011,12 @@ def build(paper, out):
                                             description=f"Every report from the {day_long(stem[:10])} issue of {PAPER}."))
     write("archive/index.html", layout(f"Back issues · {PAPER}", sheet(archive_page(editions, order, reports)), order, snaps, page="archive"))
     if HAS_FOLLOW:
-        write("follow/index.html", layout(f"Who to follow · {PAPER}", sheet(follow_page(follow_latest, follow_reports, cfg["links"].get("repo"))),
-                                          order, snaps, page="follow", description=f"Who to follow: builders suggested for {PAPER}."))
-        write("follow/picks/index.html", layout(f"This week's picks · {PAPER}", sheet(follow_picks_page(follow_latest, follow_reports)),
-                                                order, snaps, page="follow", description=f"This week's picks for {PAPER}, one at a time."))
-    if SITE["mode"] == "private" and SITE["storage"] == "cloudflare":
+        repo_url = cfg["links"].get("repo")
+        write("follow/index.html", layout(f"Who to follow · {PAPER}", sheet(follow_page(follow_latest, follow_reports, repo_url)),
+                                          order, snaps, page="follow", description=f"Who to follow: builders suggested for {PAPER}.", scripts=("follow.js",)))
+        write("follow/picks/index.html", layout(f"This week's picks · {PAPER}", sheet(follow_picks_page(follow_latest, follow_reports, repo_url)),
+                                                order, snaps, page="follow", description=f"This week's picks for {PAPER}, one at a time.", scripts=("follow.js",)))
+    if people_api():
         write("people/index.html", layout(f"People · {PAPER}", sheet(people_page()), order, snaps, page="people"))
     elif SITE["mode"] == "private":
         write("settings/index.html", layout(f"People and settings · {PAPER}", sheet(settings_page(people)), order, snaps, page="settings"))

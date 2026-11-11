@@ -201,6 +201,23 @@ class PublicBuild(unittest.TestCase):
         self.assertNotIn("https://github.com/tuber", page)
         self.assertIn("videos this week", page)
 
+    def test_nothing_on_the_page_moves_on_its_own(self):
+        front = (self.out / "index.html").read_text()
+        self.assertIn('class="ticker" role="group"', front)
+        self.assertNotIn("ticker-track", front)  # the strip is still, not a crawl
+        css = (self.out / "assets" / "style.css").read_text()
+        self.assertNotIn("@keyframes", css)
+
+    def test_phone_header_has_a_menu_and_names_the_paper_once(self):
+        front = (self.out / "index.html").read_text()
+        person = (self.out / "p" / "octo" / "index.html").read_text()
+        for page in (front, person):
+            self.assertIn('<span class="menu-label">Menu</span></button>', page)
+            self.assertNotIn('aria-expanded="false">People</button>', page)
+        topbar = lambda page: re.search(r'<header class="topbar">(.*?)</header>', page, re.S).group(1)
+        self.assertNotIn("<a ", topbar(front))  # the masthead is right below it
+        self.assertIn("<a ", topbar(person))
+
     def test_public_site_is_indexable(self):
         self.assertNotIn('content="noindex', self.html)
 
