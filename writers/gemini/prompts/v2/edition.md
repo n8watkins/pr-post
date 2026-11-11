@@ -13,6 +13,7 @@ Births, obituaries and the quote of the week are filled in by code; do not write
 - `lead`: `headline` (short, punchy, affectionate), `deck` (one sentence under the headline) and `body` (a list of one or two short paragraphs).
   Retell the lead report for the front page with its concrete items and any figures it gives; do not copy its sentences.
   Every fact and every description of what a project is must already be in the lead report: add no detail, purpose or setting it does not state.
+  Keep separate projects separate: a new repo is its own news, not part of another project's release.
   No hype words and no claims about "everyone" or "builders across the board".
 - `corrections`: the previous edition's "probably" or "looks like" guesses (listed below) that this run's work shows were wrong, one short line each.
   If none turned out wrong, return a single line saying there are no corrections this time.

@@ -235,6 +235,22 @@ def covers(highlight, urls):
     return url in {u.rstrip("/") for u in urls}
 
 
+SHA_LABEL = re.compile(r"\[(commit )?([0-9a-f]{7})[0-9a-f]{33}\]")
+
+
+def normalize_answer(answer, kind):
+    """Fix in code what needs no model: an update's plain lines become bullets, and a full commit hash in a link label
+    is cut to its first seven characters. Changes `answer` in place and returns it."""
+    if not isinstance(answer, dict) or not isinstance(answer.get("report_md"), str):
+        return answer
+    body = answer["report_md"]
+    if kind == "update" and not QUIET_RE.match(body.strip()):
+        body = "\n".join(f"- {line.strip()}" if line.strip() and not line.lstrip().startswith(("- ", "#", "* ")) else
+                         re.sub(r"^\s*\*\s", "- ", line) for line in body.splitlines())
+    answer["report_md"] = SHA_LABEL.sub(lambda m: f"[{m.group(1) or ''}{m.group(2)}]", body)
+    return answer
+
+
 def check_person(answer, person, kind, input_text):
     problems = []
     body = answer.get("report_md", "")
@@ -293,8 +309,9 @@ def check_person(answer, person, kind, input_text):
                 problems.append(f"{len(long)} bullets have more than {checks.BULLET_WORDS} words; shorten them")
         top = (person.get("highlights") or [])[:TOP_CHOICES]
         urls = checks.link_urls(body)
-        if top and top[0]["score"] >= NEWS_SCORE and not any(covers(h, urls) for h in top):
-            problems.append("the report leaves out the biggest news; cover at least one of these first: "
+        covered = [h for h in top if covers(h, urls)]
+        if top and top[0]["score"] >= NEWS_SCORE and not (covers(top[0], urls) or len(covered) >= min(2, len(top))):
+            problems.append("the report leaves out the biggest news; cover the first of these, or two of them, first: "
                             + "; ".join(f"{h['label']} {h['repo']} {h['title'][:60]} <{h['url']}>" for h in top))
     hyped = checks.hype(written)
     if hyped:
@@ -649,7 +666,7 @@ def run_split(runner, prep, previous):
         if p["status"] != "active":
             continue
         req = person_request(prompts, prep, p)
-        answer, problems = runner.run(req, lambda a, p=p, req=req: check_person(a, p, prep["kind"], req["prompt"]))
+        answer, problems = runner.run(req, lambda a, p=p, req=req: check_person(normalize_answer(a, prep["kind"]), p, prep["kind"], req["prompt"]))
         answer, used = settle(p, prep["kind"], answer, problems)
         if used:
             runner.calls[-1]["fallback"] = True
@@ -681,7 +698,7 @@ def run_single(runner, prep, previous):
     answers, fallbacks = {}, []
     for pid, person in by_id.items():
         a = got.get(pid)
-        problems = check_person(a, person, prep["kind"], req["prompt"]) if a is not None else ["missing"]
+        problems = check_person(normalize_answer(a, prep["kind"]), person, prep["kind"], req["prompt"]) if a is not None else ["missing"]
         a, used = settle(person, prep["kind"], a, problems if a is not None else ["not in the input"])
         if used:
             fallbacks.append(pid)

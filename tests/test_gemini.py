@@ -446,6 +446,12 @@ class V2ChecksTest(FixtureCase):
         gone = self.other["archived"] or [{"url": "https://github.com/ada-fixture/old"}]
         self.assertTrue(pipeline.release_only(f"Ada archived [old]({gone[0]['url']}).", [g["url"] for g in gone]))
 
+    def test_plain_lines_become_bullets_and_hashes_get_short(self):
+        sha = "0123456789abcdef0123456789abcdef01234567"
+        a = pipeline.normalize_answer({"report_md": f"Ada shipped a thing in [PR 1](https://x/pull/1).\n* Ada fixed [commit {sha}](https://x/commit/{sha})."}, "update")
+        self.assertEqual(a["report_md"], f"- Ada shipped a thing in [PR 1](https://x/pull/1).\n- Ada fixed [commit 0123456](https://x/commit/{sha}).")
+        self.assertEqual(pipeline.normalize_answer({"report_md": "Quiet since Nov 7."}, "update")["report_md"], "Quiet since Nov 7.")
+
     def test_the_fallback_uses_only_the_brief(self):
         fb = pipeline.fallback_answer(self.other, "update")
         self.assertTrue(fb["fallback"])

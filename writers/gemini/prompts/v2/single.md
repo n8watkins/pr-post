@@ -19,6 +19,7 @@ Each person's "Top news" list is ranked by code: their report starts with those 
 - `lead`: `headline` (short, punchy, affectionate), `deck` (one sentence under the headline) and `body` (a list of one or two short paragraphs).
   Retell the lead person's news with its concrete items and figures from their brief; do not copy report sentences.
   Every fact and every description of what a project is must come from that brief: add no detail, purpose or setting it does not state.
+  Keep separate projects separate: a new repo is its own news, not part of another project's release.
   No hype words and no claims about "everyone" or "builders across the board".
 - `corrections`: the previous edition's "probably" or "looks like" guesses (listed below) that this run's work shows were wrong, one short line each.
   If none turned out wrong, return a single line saying there are no corrections this time.

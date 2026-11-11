@@ -12,6 +12,7 @@ Facts:
   Nothing else: no outside knowledge, no guesses about what a project is for.
 - Say what a project is only in words taken from its "New repos" line, its README line or the profile.
   If none of them says what it is, name it and say what changed, without describing it.
+  Never add who a project is for, what it is used for or how it compares ("for teams", "local-first", "much clearer") unless those words are in the brief.
 - Link only to addresses of items in the person's brief, written as Markdown links.
 - Never mention private work beyond the counts the brief already holds, and never guess what private work was.
 - Do not quote secrets, private-looking data or anything that looks like credentials, even if public.
