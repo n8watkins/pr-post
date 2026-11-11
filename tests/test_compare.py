@@ -1,14 +1,17 @@
 """The compare tools' scoring, Gemini reviewer and multi-review unblind, offline.
 
 The packet comes from the invented paper in tests/gemini_fixture.py and the
-Gemini API is the local mock endpoint from test_gemini.py; no test reaches the
-network.
+Gemini API is a local server that streams like streamGenerateContent; no test
+reaches the network.
 """
 
+import http.server
 import io
 import json
 import os
 import sys
+import threading
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -22,6 +25,7 @@ from test_gemini import KEY, FixtureCase, MockGemini  # noqa: E402
 from tools.compare import __main__ as compare_cli  # noqa: E402
 from tools.compare import blind, gemini_review, score  # noqa: E402
 from writers.gemini import __main__ as writer_cli  # noqa: E402
+from writers.gemini import api  # noqa: E402
 
 
 def scores(missed=0, untraceable=0, numbers=0, caps=0, fmt=0, tone=0, readability=3, gut=5):
@@ -130,19 +134,95 @@ class CompareCase(FixtureCase):
         return code, out.getvalue()
 
     def gemini(self, responder):
-        server = MockGemini(responder)
+        server = MockStream(responder)
         self.addCleanup(server.close)
         return server, {"GEMINI_API_KEY": KEY, "GEMINI_API_BASE": server.base}
 
 
+class MockStream(MockGemini):
+    """A local streamGenerateContent endpoint. `responder(n)` returns (status, answer text or error body), or "hang"."""
+
+    def __init__(self, responder):
+        self.requests = []
+        mock = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                mock.requests.append({"path": self.path, "key": self.headers.get("x-goog-api-key"), "body": body})
+                out = responder(len(mock.requests))
+                if out == "hang":
+                    time.sleep(1)
+                    return
+                status, payload = out
+                if status != 200:
+                    data = json.dumps(payload).encode()
+                    self.send_response(status)
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
+                text = payload if isinstance(payload, str) else json.dumps(payload)
+                half = len(text) // 2
+                chunks = [{"candidates": [{"content": {"parts": [{"text": "thinking", "thought": True}]}}]},
+                          {"candidates": [{"content": {"parts": [{"text": text[:half]}]}}]},
+                          {"candidates": [{"content": {"parts": [{"text": text[half:]}]}, "finishReason": "STOP"}],
+                           "usageMetadata": {"promptTokenCount": 100, "candidatesTokenCount": 20, "thoughtsTokenCount": 5}}]
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                for c in chunks:
+                    self.wfile.write(f"data: {json.dumps(c)}\r\n\r\n".encode())
+                    self.wfile.flush()
+
+            def log_message(self, *a):
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}/v1beta"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+
+class StreamClientTest(unittest.TestCase):
+    def serve(self, responder):
+        server = MockStream(responder)
+        self.addCleanup(server.close)
+        return server
+
+    def test_a_busy_model_is_waited_for_but_a_timeout_is_never_resent(self):
+        server = self.serve(lambda n: (503, {"error": {"message": "busy", "details": [{"retryDelay": "1s"}]}}) if n < 3 else (200, "{}"))
+        waits = []
+        client = gemini_review.StreamClient("m", api_key=KEY, base=server.base, sleep=waits.append)
+        text, usage, info = client.generate("s", "p", {})
+        self.assertEqual((text, len(server.requests), waits, info["transport_retries"]), ("{}", 3, [1.0, 1.0], 2))
+        self.assertEqual(usage, {"input_tokens": 100, "output_tokens": 25, "thinking_tokens": 5})
+
+        server = self.serve(lambda n: (503, {"error": {"message": "busy"}}))
+        with self.assertRaisesRegex(api.GeminiError, "503: busy"):
+            gemini_review.StreamClient("m", api_key=KEY, base=server.base, sleep=lambda s: None).generate("s", "p", {})
+        self.assertEqual(len(server.requests), 3)
+
+        server = self.serve(lambda n: "hang")
+        with self.assertRaisesRegex(api.GeminiError, "not retried"):
+            gemini_review.StreamClient("m", api_key=KEY, base=server.base, timeout=0.3).generate("s", "p", {})
+        self.assertEqual(len(server.requests), 1)
+
+    def test_other_errors_are_not_retried(self):
+        server = self.serve(lambda n: (400, {"error": {"message": "bad request"}}))
+        with self.assertRaisesRegex(api.GeminiError, "400: bad request"):
+            gemini_review.StreamClient("m", api_key=KEY, base=server.base).generate("s", "p", {})
+        self.assertEqual(len(server.requests), 1)
+
+
 class GeminiReviewTest(CompareCase):
     def test_one_request_with_only_the_packet_and_the_reviewer_prompt(self):
-        server, env = self.gemini(lambda s, p, sc, n: (200, MockGemini.wrap(answer())))
+        server, env = self.gemini(lambda n: (200, answer()))
         code, out = self.cli("review", "--reviewer", "gemini", "--date", "2026-11-14", "--model", "gemini-test", env=env)
         self.assertEqual(code, 0)
         self.assertEqual(len(server.requests), 1)
         req = server.requests[0]
-        self.assertEqual(req["path"], "/v1beta/models/gemini-test:generateContent")
+        self.assertEqual(req["path"], "/v1beta/models/gemini-test:streamGenerateContent?alt=sse")
+        self.assertEqual(req["key"], KEY)
         self.assertEqual(req["body"]["systemInstruction"]["parts"][0]["text"], (HERE.parent / "tools" / "compare" / "REVIEWER.md").read_text())
         prompt = req["body"]["contents"][0]["parts"][0]["text"]
         self.assertTrue(prompt.endswith((self.folder / "packet.md").read_text()))
@@ -155,15 +235,13 @@ class GeminiReviewTest(CompareCase):
         self.assertEqual((parsed["A"]["missed_news"], parsed["B"]["missed_news"], parsed["A"]["gut_score"]), (1, 2, 7))
 
     def test_an_unusable_answer_is_asked_once_more_then_given_up(self):
-        def flaky(s, p, sc, n):
-            return 200, ({"candidates": [{"content": {"parts": [{"text": "not json"}]}}]} if n == 1 else MockGemini.wrap(answer()))
-        server, env = self.gemini(flaky)
+        server, env = self.gemini(lambda n: (200, "not json" if n == 1 else answer()))
         self.assertEqual(self.cli("review", "--date", "2026-11-14", env=env)[0], 0)
         self.assertEqual(len(server.requests), 2)
         self.assertIn("could not be used", server.requests[1]["body"]["contents"][0]["parts"][0]["text"])
 
         bad = answer(a=scores(readability=9))
-        server, env = self.gemini(lambda s, p, sc, n: (200, MockGemini.wrap(bad)))
+        server, env = self.gemini(lambda n: (200, bad))
         (self.folder / "review-gemini.md").unlink()
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as e:
             self.cli("review", "--date", "2026-11-14", env=env)

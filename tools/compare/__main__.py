@@ -113,7 +113,7 @@ def main(argv=None):
         out = Path(args.out) if args.out else packet.parent / f"review-{args.reviewer}.md"
         try:
             text = packet.read_text()
-            client = api.Client(args.model, timeout=600)
+            client = gemini_review.StreamClient(args.model)
             md, stats = gemini_review.review(client, text)
         except OSError as e:
             sys.exit(f"compare: cannot read the packet: {e}")

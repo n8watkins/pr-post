@@ -190,8 +190,10 @@ Writers are ranked by their mean points over the reviewers; the mean gut score o
 There are two independent reviewers.
 The Claude review is an agent or routine step that writes `review-claude.md`.
 `review --reviewer gemini` sends only REVIEWER.md (as the system instruction) and the packet to the Gemini API and writes `review-gemini.md` in the same shape.
-It is one request, and a second only when the answer is not usable JSON or its scores do not parse; transport errors (429 and 5xx) are retried by the client as in the writer.
-`--model` picks the model (default `gemini-3.8-flash`, the strongest Flash model on the free tier); the key is `GEMINI_API_KEY` from pass-env, and the privacy note above applies to the packet too.
+It is one request, and a second only when the answer is not usable JSON or its scores do not parse.
+The answer is streamed (`streamGenerateContent`), so a long review is not cut off by one overall read timeout.
+A 429 or 503 (the server did no work) waits and tries again, at most twice; a timeout or a dropped connection is never resent, since that request may already have been billed.
+`--model` picks the model (default `gemini-3.5-flash`; `gemini-3.8-flash` is stronger on the free tier but is often overloaded); the key is `GEMINI_API_KEY` from pass-env, and the privacy note above applies to the packet too.
 `score` and `unblind` read every `review-*.md` in the packet folder (or the files given with `--review`, repeatable); an older `review.md` counts as the Claude reviewer's.
 
 `unblind` names the writers, adds a cost table from `gemini/usage/<date>.json` (`--price-in` and `--price-out` turn tokens into dollars; `--claude-usage` adds the Claude run's numbers if you have them), the points table, and every review one after the other, in one file: `reviews/<date>-<label>.md`.
