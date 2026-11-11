@@ -75,6 +75,8 @@ jobs:
           role-duration-seconds: 900
       - name: Email new issues
         env:
+          CLOUDFLARE_EMAIL_TOKEN: ${{ secrets.CLOUDFLARE_EMAIL_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           DRY_RUN: ${{ inputs.dry_run && 'true' || '' }}
         run: |
           paper/bin/quiet python3 scripts/send_email.py --paper "$WORK" --unsent ${DRY_RUN:+--dry-run --preview "$RUNNER_TEMP/digest.html"}

@@ -51,6 +51,8 @@ jobs:
       - name: Send the picks
         env:
           ACTION_SIGNING_KEY: ${{ secrets.ACTION_SIGNING_KEY }}
+          CLOUDFLARE_EMAIL_TOKEN: ${{ secrets.CLOUDFLARE_EMAIL_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           DRY_RUN: ${{ inputs.dry_run && 'true' || '' }}
           FORCE: ${{ inputs.test_send && 'true' || '' }}
         run: |

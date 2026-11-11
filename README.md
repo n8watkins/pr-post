@@ -69,7 +69,7 @@ reader = "a friend of theirs, technical but not inside their projects"   # who w
 [email]                             # only for written reports sent by email (docs/email.md)
 to = ""
 from = "PR Post <onboarding@resend.dev>"
-via = "resend"                      # "ses" (Amazon SES) or "resend"
+via = "resend"                      # "cloudflare" (recommended), "ses" (Amazon SES) or "resend"
 
 [delivery]
 email = false
@@ -101,6 +101,7 @@ To get suggestions instead, turn on `[follow]`: `scripts/follow.py` finds builde
 | `GITHUB_TOKEN` | GitHub API access; Actions provides one automatically |
 | `PR_POST_SITE_URL`, `PR_POST_BASE_PATH` | Override `[site] url` and `base_path`; the Pages workflow sets them |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` | Only for sending email through Amazon SES; in Actions they come from GitHub OIDC, so no key is stored ([docs/email.md](docs/email.md)) |
+| `CLOUDFLARE_EMAIL_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | Only for sending email through Cloudflare Email Service (recommended): an API token with only the Email Sending: Edit permission, and the account id ([docs/email.md](docs/email.md)) |
 | `RESEND_API_KEY` | Only for sending email through Resend (`--dry-run` checks everything without sending) |
 | `ACTION_SIGNING_KEY` | Only for one-click buttons in the Who to follow email (`act.py`, the Worker's `/act/` links) |
 

@@ -1,4 +1,4 @@
-"""Shared parts of the emails: a short, robust HTML shell and sending, through Amazon SES or Resend.
+"""Shared parts of the emails: a short, robust HTML shell and sending, through Cloudflare Email Service, Amazon SES or Resend.
 
 Email clients are the hard part. The rules this module follows:
 
@@ -25,6 +25,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+import cfmail
 import ses
 from md import safe_url
 
@@ -161,17 +162,28 @@ def send(key, sender, to, subject, page, text):
 
 
 def transport(watch):
-    """How this paper sends: ("ses", credentials or None) or ("resend", key or None), from [email] via."""
-    if watch["email"]["via"] == "ses":
+    """How this paper sends: ("cloudflare", (account, token) or None), ("ses", credentials or None) or
+    ("resend", key or None), from [email] via."""
+    via = watch["email"]["via"]
+    if via == "cloudflare":
+        return "cloudflare", cfmail.credentials()
+    if via == "ses":
         return "ses", ses.credentials()
     return "resend", os.environ.get("RESEND_API_KEY") or None
+
+
+NAMES = {
+    "cloudflare": ("Cloudflare Email Service", "CLOUDFLARE_EMAIL_TOKEN and CLOUDFLARE_ACCOUNT_ID"),
+    "ses": ("Amazon SES", "AWS credentials"),
+    "resend": ("Resend", "RESEND_API_KEY"),
+}
 
 
 def describe(watch):
     """A line for dry runs: which service, and whether its credentials are there. Never the values."""
     via, creds = transport(watch)
-    what = "AWS credentials" if via == "ses" else "RESEND_API_KEY"
-    return f"{'Amazon SES' if via == 'ses' else 'Resend'} ({what} {'set' if creds else 'not set'})"
+    service, what = NAMES[via]
+    return f"{service} ({what} {'set' if creds else 'not set'})"
 
 
 def suppressed(paper, to):
@@ -201,7 +213,7 @@ def check_delivery(watch, dry_run, paper=None):
         raise SystemExit(f"Not sending: the recipient is suppressed ({why}). Fix the address, then clear it on the site.")
     via, creds = transport(watch)
     if not creds and not dry_run:
-        return ("No AWS credentials; skipping email." if via == "ses" else "RESEND_API_KEY not set; skipping email.")
+        return f"No {NAMES[via][1]}; skipping email." if via != "resend" else "RESEND_API_KEY not set; skipping email."
     return None
 
 
@@ -209,6 +221,11 @@ def deliver(watch, subject, page, text):
     """Send one email to [email] to through the paper's transport. Returns the provider's message id."""
     cfg = watch["email"]
     via, creds = transport(watch)
+    if via == "cloudflare":
+        try:
+            return cfmail.send(cfg["from"], cfg["to"], subject, page, text, creds)
+        except cfmail.CloudflareMailError as e:
+            raise SystemExit(str(e)) from None
     if via == "ses":
         try:
             return ses.send(cfg["from"], cfg["to"], subject, page, text, cfg["region"], cfg["configuration_set"], creds)

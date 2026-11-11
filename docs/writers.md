@@ -110,8 +110,8 @@ This is how the demo runs.
 
 ## Email digests
 
-`scripts/send_email.py` turns one or more reports into a single HTML email through [Resend](https://resend.com).
-Set `[email] to` and `from`, set `email = true` under `[delivery]`, and run it with `RESEND_API_KEY` in the environment:
+`scripts/send_email.py` turns one or more reports into a single HTML email through [Cloudflare Email Service](https://developers.cloudflare.com/email-service/), Amazon SES or [Resend](https://resend.com) (docs/email.md).
+Set `[email] to` and `from`, set `email = true` under `[delivery]`, and run it with the chosen service's credentials in the environment (`CLOUDFLARE_EMAIL_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` for Cloudflare):
 
 ```sh
 python3 scripts/send_email.py --paper paper paper/reports/<id>/<date>-weekly.md
@@ -119,5 +119,5 @@ python3 scripts/send_email.py --paper paper <report.md> --preview out.html   # r
 python3 scripts/send_email.py --paper paper <report.md> --dry-run            # every check, nothing sent
 ```
 
-`--dry-run` checks that email is on, that `[email] to` is set and whether `RESEND_API_KEY` is present, prints the subject, and stops before contacting Resend; combine it with `--preview` to keep the HTML.
+`--dry-run` checks that email is on, that `[email] to` is set and whether the credentials are present, prints the subject, and stops before contacting the service; combine it with `--preview` to keep the HTML.
 It never prints the recipient or the key.

@@ -1,13 +1,13 @@
 # Email
 
 pr-post can send two short emails: a digest of written reports (`scripts/send_email.py`) and the Who to follow picks (`scripts/send_follow.py`).
-Both go through one of two services, chosen with `[email] via`:
+Both go through one of three services, chosen with `[email] via`: Cloudflare Email Service (recommended), Amazon SES or Resend.
 
 ```toml
 [email]
 to = "you@example.com"
 from = "PR Post <paper@post.example.com>"
-via = "ses"                    # "ses" (Amazon SES) or "resend"
+via = "cloudflare"             # "cloudflare" (recommended), "ses" (Amazon SES) or "resend"
 region = "us-east-1"           # SES only
 configuration_set = "pr-post"  # SES only: reports bounces and complaints
 
@@ -17,6 +17,23 @@ email = true
 
 `--dry-run` runs every check a real send would and sends nothing.
 It never prints the recipient, the subject or a key, because dry runs often run in public Actions logs.
+
+## Cloudflare Email Service (recommended)
+
+`scripts/cfmail.py` calls the Email Service REST API (`POST /accounts/{account_id}/email/sending/send`) with the standard library only.
+There is nothing to run on AWS, and sending costs nothing extra on a Workers Paid account for a paper that sends a few emails a week.
+
+1. Onboard the sender domain: in the Cloudflare dashboard open **Compute, Email Service, Email Sending**, add the domain and add the DNS records it shows, or run `npx wrangler email sending enable your-domain.com`.
+   Use a subdomain or domain of its own, and set `[email] from` to an address on it, for example `PR Post <paper@your-domain.com>`.
+2. Create an API token at **My Profile, API Tokens, Create Token, Create Custom Token** with exactly one permission: **Account, Email Sending, Edit**.
+   Scope it to your account.
+   Do not reuse the token that deploys the Worker.
+3. Store the token as the Actions secret `CLOUDFLARE_EMAIL_TOKEN`, and your account id (dashboard sidebar, or the URL after `dash.cloudflare.com/`) as the Actions variable `CLOUDFLARE_ACCOUNT_ID`.
+   The jobs that send already pass both to the scripts.
+4. Set `via = "cloudflare"` in `watchlist.toml` and run **Paper: publish** with **Dry run** once; it reports whether both values are set without printing them.
+
+The sandbox rules of SES do not apply, but Cloudflare only sends from onboarded domains.
+Bounces and complaints are not reported back to the Worker yet (that is SES only); a permanent bounce for the recipient fails the send.
 
 ## Amazon SES
 
@@ -51,4 +68,4 @@ SES costs about $0.10 per 1,000 emails, and SNS HTTPS notifications are free for
 
 ## Resend
 
-With `via = "resend"` (the default) the emails go through Resend with `RESEND_API_KEY`.
+With `via = "resend"` (the default, kept for existing papers) the emails go through Resend with `RESEND_API_KEY`.

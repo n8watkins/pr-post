@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Email one issue of reports as a short digest, through Amazon SES or Resend.
+"""Email one issue of reports as a short digest, through Cloudflare Email Service, Amazon SES or Resend.
 
 Usage:
     python3 scripts/send_email.py [--paper DIR] <paper>/reports/<id>/<date>-<kind>.md [more.md ...]
@@ -18,7 +18,7 @@ The TL;DR comes from the issue's edition (editions/<date>-<kind>.json): its
 "Who to follow" has its own email (send_follow.py).
 
 Sends through [email] via in watchlist.toml: "ses" needs AWS credentials in
-the environment (docs/email.md), "resend" needs RESEND_API_KEY. Recipient and
+the environment (docs/email.md), "cloudflare" needs CLOUDFLARE_EMAIL_TOKEN and CLOUDFLARE_ACCOUNT_ID, "resend" needs RESEND_API_KEY. Recipient and
 sender come from [email], and sending must be turned on with email = true
 under [delivery]. Exits 0 with a message when email is turned off or no
 credentials are configured, so a run without email still succeeds. A recipient
