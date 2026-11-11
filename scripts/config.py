@@ -46,7 +46,9 @@ WRITER_DEFAULTS = {
 EMAIL_DEFAULTS = {
     "to": "",
     "from": "PR Post <onboarding@resend.dev>",
-    "via": "resend",              # "ses" (Amazon SES, AWS credentials in the environment) or "resend" (RESEND_API_KEY)
+    # "worker" (the paper's Worker sends it, PR_POST_API and PR_POST_TOKEN), "ses" (Amazon SES,
+    # AWS credentials in the environment) or "resend" (RESEND_API_KEY); EMAIL_VIA overrides it.
+    "via": "resend",
     "region": "us-east-1",        # SES only: the region of the verified sender identity
     "configuration_set": "",      # SES only: the configuration set that reports bounces and complaints
 }
@@ -244,8 +246,8 @@ def parse(text):
             raise ConfigError(f'"{p["id"]}" is listed twice')
         seen.add(p["id"])
     email = {**EMAIL_DEFAULTS, **(raw.get("email") or {})}
-    if email["via"] not in ("ses", "resend"):
-        raise ConfigError('[email] via must be "ses" or "resend"')
+    if email["via"] not in ("worker", "ses", "resend"):
+        raise ConfigError('[email] via must be "worker", "ses" or "resend"')
     if not re.fullmatch(r"[a-z]{2}(-[a-z]+)+-\d", email["region"]):
         raise ConfigError('[email] region must be an AWS region such as "us-east-1"')
     if email["configuration_set"] and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", email["configuration_set"]):

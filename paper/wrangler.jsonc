@@ -14,7 +14,8 @@
   "$schema": "../node_modules/wrangler/config-schema.json",
   "name": "pull-request-post",
   "account_id": "b2c564cf83cb9184dd6d7cc4ff8b38bf",
-  "main": "../worker/index.js",
+  // worker/main.js adds the EmailEvents entrypoint (bounces from mailroom) to worker/index.js.
+  "main": "../worker/main.js",
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
   "vars": {
@@ -24,12 +25,18 @@
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": "",
     // The SNS topic SES reports bounces and complaints to (the TopicArn output of paper/aws/ses.yml).
-    "SES_TOPIC_ARN": ""
+    "SES_TOPIC_ARN": "",
+    // The sender's display name on the paper's emails (worker/email.js).
+    "EMAIL_FROM_NAME": "The Pull Request Post"
   },
   "d1_databases": [
     { "binding": "DB", "database_name": "pr-post", "database_id": "2b4ca910-88b0-494b-a51d-a0c6da9a8869", "migrations_dir": "migrations" }
   ],
   "r2_buckets": [{ "binding": "STORE", "bucket_name": "pr-post-paper" }],
+  // The paper's email goes through mailroom (github.com/n8watkins/mailroom),
+  // which sends from prpost@n8builds.dev with caps and passes bounces back to
+  // the EmailEvents entrypoint. Only the live paper has it; staging sends nothing.
+  "services": [{ "binding": "MAILROOM", "service": "mailroom", "entrypoint": "Mailroom", "props": { "app": "prpost" } }],
   "observability": { "enabled": true },
   // The clock for the paper's GitHub Actions jobs (worker/jobs.js): collect on
   // Wednesdays and Saturdays at 11:00 UTC, publish as a backstop after the

@@ -18,6 +18,20 @@ email = true
 `--dry-run` runs every check a real send would and sends nothing.
 It never prints the recipient, the subject or a key, because dry runs often run in public Actions logs.
 
+## Through the paper's Worker (`via = "worker"`)
+
+With a private paper on Cloudflare, the jobs can hand each email to the paper's Worker instead: they POST it to `/api/email/send` with `JOBS_TOKEN` (`PR_POST_API` and `PR_POST_TOKEN`, which the paper workflows already have), and the Worker sends it (`worker/email.js`).
+No email key is needed anywhere.
+The Worker sends through one of:
+
+- a `MAILROOM` service binding to [mailroom](https://github.com/n8watkins/mailroom), the owner's Worker that sends every app's email through Cloudflare Email Service with caps and bounce handling (the owner's paper, `paper/wrangler.jsonc`);
+- a `send_email` binding named `EMAIL` and an `EMAIL_FROM` variable on a domain onboarded for Cloudflare Email Sending, for a paper on another account.
+
+Each email carries a key made from its recipient, subject and text, so a retried job never sends it twice.
+mailroom passes bounces and complaints back to the Worker's `EmailEvents` entrypoint (`worker/main.js`), into the same `email_events` table: a hard bounce or a complaint suppresses the address until it is cleared on the People page.
+
+The `EMAIL_VIA` repository variable overrides `[email] via` in the paper workflows, so the transport can be switched without editing the watch list.
+
 ## Amazon SES
 
 `scripts/ses.py` calls the SES v2 `SendEmail` API with Signature Version 4, written with the standard library, so the engine still has no dependencies.

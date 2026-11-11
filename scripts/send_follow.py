@@ -162,7 +162,7 @@ def main():
         print(f"Dry run: would send the Who to follow email with {one_click} through {E.describe(watch)}. Nothing was sent.")
         return
     print(f"Sending with {one_click}.")
-    print("Sent:", E.deliver(watch, subject, page, text))
+    print("Sent:", E.deliver(watch, subject, page, text, kind="follow"))
 
 
 if __name__ == "__main__":

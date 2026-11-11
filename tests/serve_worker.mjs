@@ -10,6 +10,16 @@ const env = {
   JOBS_TOKEN: process.env.JOBS_TOKEN, WRITER_TOKEN: process.env.WRITER_TOKEN, SITE_PASSWORD: process.env.SITE_PASSWORD,
 };
 if (process.env.SEED_SQL) env.DB.raw.exec(process.env.SEED_SQL);
+// A stand-in for mailroom (tests/test_email_worker.py): answers with an id made
+// from the kind and key, and refuses one address the way a spent cap does.
+if (process.env.FAKE_MAILROOM) {
+  env.MAILROOM = {
+    async send(m) {
+      if (m.to === "capped@example.com") return { ok: false, code: "cap_app_day", retryable: true, message: "This app reached its daily email cap." };
+      return { ok: true, messageId: `mr-${m.kind}-${m.key}` };
+    },
+  };
+}
 
 createServer(async (req, res) => {
   const chunks = [];

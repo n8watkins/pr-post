@@ -131,11 +131,3 @@ export async function handleSesEvents(request, env) {
   console.log(`SES event: ${event.eventType || event.notificationType || "unknown"} (${rows.length} recipient(s))`);
   return reply(200, { ok: true, stored: rows.length });
 }
-
-/** Addresses that must not get email: a permanent bounce or a complaint not yet cleared. */
-export async function suppressedList(env) {
-  const rows = await env.DB.prepare(`SELECT address, MAX(at) AS at, CASE WHEN SUM(type = 'Complaint') > 0 THEN 'Complaint' ELSE 'Permanent bounce' END AS reason
-    FROM email_events WHERE cleared_at IS NULL AND (type = 'Complaint' OR (type = 'Bounce' AND detail LIKE 'Permanent%'))
-    GROUP BY address ORDER BY address`).all();
-  return rows.results;
-}

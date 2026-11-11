@@ -24,7 +24,7 @@
 // Each bulk write is one SQL statement (json_each), so a request stays far
 // below the Workers free plan's per-request query limit.
 
-import { suppressedList } from "./sns.js";
+import { suppressedList } from "./email.js";
 import { validatePeople } from "./lib.js";
 
 export const PATH_RE = /^[A-Za-z0-9_-][A-Za-z0-9._-]*(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$/;
