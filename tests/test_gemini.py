@@ -221,6 +221,17 @@ class ChecksTest(unittest.TestCase):
         problems = checks.check_text("report_md", "word " * 121, "", checks.CAPS["update"])
         self.assertEqual(problems, ["report_md has 121 words; the limit is 120"])
 
+    def test_a_quoted_description_is_not_the_writer_saying_you(self):
+        brief = "- 2026-11-10 o/bank: A tiny currency for your Slack <https://github.com/o/bank>"
+        self.assertFalse(checks.second_person("Dax started bank, a tiny currency for your Slack.", brief))
+        self.assertTrue(checks.second_person("Dax started bank for your team.", brief))
+        self.assertTrue(checks.second_person("You shipped it."))
+
+    def test_copied_runs(self):
+        source = "Released Datasette 1.0a42 with a redesigned homepage showing a searchable catalog of tables."
+        self.assertTrue(checks.copied_runs("Simon released Datasette 1.0a42 with a redesigned homepage showing a searchable catalog.", source))
+        self.assertEqual(checks.copied_runs("Simon's Datasette got a new front page you can search.", source), [])
+
     def test_shape(self):
         schema = pipeline.edition_schema()
         self.assertIn("answer is missing weather", checks.check_shape({"tldr": ["a", "b", "c"], "lead": {}, "corrections": []}, schema))
@@ -422,6 +433,18 @@ class V2ChecksTest(FixtureCase):
         self.assertTrue(any("link labels must be short" in p for p in self.problems(self.other, long + self.good("Ada"))))
         self.assertTrue(pipeline.release_only("Also released [tool v1.2.0](https://github.com/o/tool/releases/tag/v1.2.0)."))
         self.assertFalse(pipeline.release_only("[PR 3](https://github.com/o/tool/pull/3)"))
+
+    def test_the_front_page_has_no_links_and_does_not_copy_the_lead(self):
+        report = "- Ada shipped the long awaited sync engine that keeps every laptop in step: [PR 1](https://x/pull/1)."
+        front = {"tldr": ["Ada shipped [sync](https://x/pull/1)."], "weather": "Clear.", "corrections": ["None."],
+                 "lead": {"headline": "Sync", "deck": "Ada shipped.", "body": ["Ada shipped the long awaited sync engine that keeps every laptop in step."]}}
+        problems = pipeline.check_edition(front, report, report)
+        self.assertTrue(any("no Markdown links" in p for p in problems))
+        self.assertTrue(any("word for word" in p for p in problems))
+
+    def test_an_archived_repo_bullet_needs_no_more_words(self):
+        gone = self.other["archived"] or [{"url": "https://github.com/ada-fixture/old"}]
+        self.assertTrue(pipeline.release_only(f"Ada archived [old]({gone[0]['url']}).", [g["url"] for g in gone]))
 
     def test_the_fallback_uses_only_the_brief(self):
         fb = pipeline.fallback_answer(self.other, "update")

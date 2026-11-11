@@ -111,9 +111,34 @@ BULLET_WORDS = 25
 UNLINKED_SECTIONS = ("tl;dr", "worth asking", "how you look")
 
 
-def second_person(text):
-    """Whether the text, outside its links, addresses someone as "you"."""
-    return bool(YOU_RE.search(MD_LINK.sub(r"\1", strip_urls(text or ""))))
+def second_person(text, source=""):
+    """Whether the text, outside its links, addresses someone as "you".
+
+    A "you" or "your" inside words quoted from `source` (a repo description such as
+    "A tiny currency for your Slack") is the source talking, not the writer, so it does not count.
+    """
+    plain = MD_LINK.sub(r"\1", strip_urls(text or ""))
+    src = " ".join(re.findall(r"[\w']+", (source or "").lower()))
+    for m in YOU_RE.finditer(plain):
+        before = re.findall(r"[\w']+", plain[:m.start()])[-2:]
+        after = re.findall(r"[\w']+", plain[m.end():])[:2]
+        snippet = " ".join(w.lower() for w in [*before, m.group(0), *after])
+        if not src or len(before) + len(after) < 3 or f" {snippet} " not in f" {src} ":
+            return True
+    return False
+
+
+def copied_runs(text, source, n=8):
+    """Runs of `n` words that `text` copies word for word from `source` (links and punctuation ignored)."""
+    norm = lambda s: re.findall(r"[\w']+", MD_LINK.sub(r"\1", strip_urls(s or "")).lower())
+    src, out = norm(source), []
+    grams = {" ".join(src[i:i + n]) for i in range(len(src) - n + 1)}
+    words_ = norm(text)
+    for i in range(len(words_) - n + 1):
+        g = " ".join(words_[i:i + n])
+        if g in grams and not any(g in o for o in out):
+            out.append(g)
+    return out
 
 
 def hype(text):

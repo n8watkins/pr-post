@@ -212,10 +212,11 @@ TOP_CHOICES = 3  # the report must cover at least one of the top items prepare.p
 LABEL_WORDS = 6  # a link label longer than this is a pasted title
 
 
-def release_only(bullet):
-    """A bullet that only announces releases: a release with no notes has nothing more to say than its project and version."""
+def release_only(bullet, archived=()):
+    """A bullet that only announces releases or archived repos: with no notes there is nothing more to say than the name."""
     urls = checks.link_urls(bullet)
-    return bool(urls) and all("/releases/" in u for u in urls) and checks.words_outside_links(bullet) >= 2
+    gone = {u.rstrip("/") for u in archived}
+    return bool(urls) and all("/releases/" in u or u.rstrip("/") in gone for u in urls) and checks.words_outside_links(bullet) >= 2
 
 
 def brief_urls(person):
@@ -258,7 +259,7 @@ def check_person(answer, person, kind, input_text):
                         "link only to the brief's items")
     # Who "you" is.
     written = body + "\n" + story.get("headline", "") + "\n" + story.get("summary", "")
-    if not person["self"] and checks.second_person(written):
+    if not person["self"] and checks.second_person(written, person.get("brief", "")):
         problems.append(f"{person['name']} is not the reader, but the report or story says \"you\" or \"your\"; "
                         f"write about {first_name(person)} in the third person")
     quiet = bool(QUIET_RE.match(body.strip()))
@@ -276,7 +277,7 @@ def check_person(answer, person, kind, input_text):
         if unlinked:
             problems.append(f"every bullet needs a Markdown link to its item in the brief; these have none: "
                             + "; ".join(f"\"{b[:60]}\"" for b in unlinked[:3]))
-        bare = [b for _, b in item_bullets if checks.link_urls(b) and not release_only(b) and checks.words_outside_links(b) < OWN_WORDS]
+        bare = [b for _, b in item_bullets if checks.link_urls(b) and not release_only(b, [g["url"] for g in person.get("archived") or []]) and checks.words_outside_links(b) < OWN_WORDS]
         if bare:
             problems.append("these bullets are only a linked title; say in plain words what changed and why it matters, then link: "
                             + "; ".join(f"\"{b[:60]}\"" for b in bare[:3]))
@@ -315,8 +316,16 @@ def edition_text(answer):
                       *lead.get("body", []), *answer.get("corrections", [])])
 
 
-def check_edition(answer, input_text):
+def check_edition(answer, input_text, lead_report=""):
+    """Checks for the front page; `lead_report` is the lead's report, which the lead must retell, not copy."""
     problems = []
+    lead = answer.get("lead") or {}
+    linked = [s for s in [*answer.get("tldr", []), lead.get("deck", ""), *lead.get("body", [])] if checks.MD_LINK.search(s or "")]
+    if linked:
+        problems.append("the front page is plain text: no Markdown links in the TL;DR, deck or lead body (the sources are added by code)")
+    copied = checks.copied_runs("\n".join([lead.get("deck", ""), *lead.get("body", [])]), lead_report) if lead_report else []
+    if copied:
+        problems.append("the lead copies the report word for word (\"" + "\"; \"".join(copied[:2]) + "\"); retell it in new sentences")
     for i, b in enumerate(answer.get("tldr") or []):
         if checks.words(b) > checks.TLDR_WORDS:
             problems.append(f"tldr[{i}] has {checks.words(b)} words; the limit is {checks.TLDR_WORDS}")
@@ -435,11 +444,26 @@ def link_label(text):
     return clip_text(text, 60).replace("[", "(").replace("]", ")")
 
 
+def capitalized(line):
+    """A line that starts with a capital ("you shipped..." at the start of a TL;DR bullet becomes "You shipped...")."""
+    line = (line or "").strip()
+    return line[:1].upper() + line[1:]
+
+
+def description(repo, text):
+    """A repo's own description, without a leading "Name:" that repeats the repo name."""
+    text = clip_text(text)
+    name = short_repo(repo)
+    if text.lower().startswith(name.lower() + ":"):
+        text = text[len(name) + 1:].strip()
+    return text
+
+
 def fallback_line(h):
     """One plain, correct bullet for a highlight, using only the brief's own words."""
     name = short_repo(h["repo"])
     if h["kind"] == "birth":
-        return f"New repo [{name}]({h['url']}): {clip_text(h['title'])}."
+        return f"New repo [{name}]({h['url']}), in its own words: \"{description(h['repo'], h['title'])}\""
     if h["kind"] == "archived":
         return f"Archived or took down [{name}]({h['url']})."
     if h["kind"] == "release":
@@ -447,7 +471,9 @@ def fallback_line(h):
     if h["kind"] == "video":
         return f"Posted a new video: [{link_label(h['title'])}]({h['url']})."
     verb = {"pr": "Merged", "open_pr": "Opened", "commit": "Committed"}.get(h["kind"], "Worked on")
-    return f"{verb} in {name}: [{link_label(h['title'])}]({h['url']})."
+    number = re.search(r"/pull/(\d+)", h["url"])
+    label = f"PR {number.group(1)}" if number else "commit"
+    return f"{verb} a change in {name}, titled \"{clip_text(h['title'])}\" ([{label}]({h['url']}))."
 
 
 def fallback_answer(person, kind):
@@ -585,7 +611,7 @@ def assemble(prep, answers, front, lead_id, model, prompts, mode):
     lead = front["lead"]
     edition = {
         "date": date, "kind": kind, "source": model, "prompt_version": prompts["version"], "prompt_sha": prompts["sha"], "mode": mode,
-        "tldr": front["tldr"], "weather": front["weather"],
+        "tldr": [capitalized(b) for b in front["tldr"]], "weather": front["weather"],
         "lead": {"id": lead_id, "headline": lead["headline"], "deck": lead["deck"], "body": lead["body"],
                  "sources": lead_sources(answers[lead_id]["report_full"])},
         "stories": stories, "obituaries": obits, "births": births,
@@ -636,7 +662,7 @@ def run_split(runner, prep, previous):
         return answers, None, None, failed
     lead_id = choose_lead(prep, answers)
     req = edition_request(prompts, prep, answers, lead_id, previous)
-    front, _ = runner.run(req, lambda a: check_edition(a, req["prompt"]))
+    front, _ = runner.run(req, lambda a: check_edition(a, req["prompt"], answers[lead_id]["report_md"]))
     if front is None:
         failed.append("edition")
     return answers, front, lead_id, failed
