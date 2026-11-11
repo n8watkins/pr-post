@@ -35,7 +35,7 @@
   "r2_buckets": [{ "binding": "STORE", "bucket_name": "pr-post-paper" }],
   // The paper's email goes through mailroom (github.com/n8watkins/mailroom),
   // which sends from prpost@n8builds.dev with caps and passes bounces back to
-  // the EmailEvents entrypoint. Only the live paper has it; staging sends nothing.
+  // the EmailEvents entrypoint (on this Worker, which mailroom's HOOK_PRPOST names).
   "services": [{ "binding": "MAILROOM", "service": "mailroom", "entrypoint": "Mailroom", "props": { "app": "prpost" } }],
   "observability": { "enabled": true },
   // The clock for the paper's GitHub Actions jobs (worker/jobs.js): collect on
@@ -54,12 +54,16 @@
         "GITHUB_REPO": "n8watkins/pr-post",
         "ACCESS_TEAM_DOMAIN": "",
         "ACCESS_AUD": "",
-        "SES_TOPIC_ARN": ""
+        "SES_TOPIC_ARN": "",
+        "EMAIL_FROM_NAME": "The Pull Request Post"
       },
       "d1_databases": [
         { "binding": "DB", "database_name": "pr-post", "database_id": "2b4ca910-88b0-494b-a51d-a0c6da9a8869", "migrations_dir": "migrations" }
       ],
       "r2_buckets": [{ "binding": "STORE", "bucket_name": "pr-post-paper" }],
+      // The paper workflows' PR_POST_API is this Worker, so it sends the jobs'
+      // email too, as the same mailroom app; bounces still go to the live Worker.
+      "services": [{ "binding": "MAILROOM", "service": "mailroom", "entrypoint": "Mailroom", "props": { "app": "prpost" } }],
       "observability": { "enabled": true },
       "triggers": { "crons": [] }
     }
