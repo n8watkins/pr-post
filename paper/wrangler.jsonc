@@ -58,8 +58,8 @@
         { "binding": "DB", "database_name": "pr-post", "database_id": "2b4ca910-88b0-494b-a51d-a0c6da9a8869", "migrations_dir": "migrations" }
       ],
       "r2_buckets": [{ "binding": "STORE", "bucket_name": "pr-post-paper" }],
-      // The paper workflows' PR_POST_API is this Worker, so it sends the jobs'
-      // email too, as the same mailroom app; bounces still go to the live Worker.
+      // Point a job's PR_POST_API here to test it end to end: it then sends that
+      // job's email too, as the same mailroom app; bounces still go to the live Worker.
       "services": [{ "binding": "MAILROOM", "service": "mailroom", "entrypoint": "Mailroom", "props": { "app": "prpost" } }],
       "observability": { "enabled": true },
       "triggers": { "crons": [] }
