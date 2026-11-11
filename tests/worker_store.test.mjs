@@ -48,6 +48,11 @@ test("lanes: who may read and write which paper paths", () => {
   assert.ok(!paperAllowed("writer", "briefs/ada.md", true));
   assert.ok(!paperAllowed("writer", "follow/latest.json", false));
   assert.ok(!paperAllowed("writer", "logs/run.log", false));
+  assert.ok(paperAllowed("jobs", "gemini/reports/ada/2026-11-14-weekly.md", true));
+  assert.ok(paperAllowed("jobs", "reviews/2026-11-14.md", true));
+  assert.ok(paperAllowed("owner", "gemini/usage/2026-11-14.json", false));
+  assert.ok(!paperAllowed("writer", "gemini/reports/ada/2026-11-14-weekly.md", false)); // the Claude routine never sees Gemini's work
+  assert.ok(!paperAllowed("writer", "reviews/2026-11-14.md", false));
 });
 
 test("a wrong or empty bearer token gets nothing", async () => {
