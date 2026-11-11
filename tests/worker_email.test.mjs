@@ -7,7 +7,7 @@ import { fakeD1, fakeR2 } from "./fakes.mjs";
 
 const JOBS = "j".repeat(40);
 const WRITER = "w".repeat(40);
-const email = { kind: "digest", to: "Owner@Example.com", subject: "This week in the paper", html: "<p>Hi</p>", text: "Hi", key: "digest-abc123" };
+const email = { kind: "digest", to: "Owner@Example.com", subject: "This week in the paper", html: "<p>Hi</p>", text: "Hi", key: "digest-1" };
 
 function mailroom(answer = { ok: true, messageId: "mr-1" }) {
   const calls = [];
@@ -24,7 +24,7 @@ test("the jobs' email goes to mailroom with the paper's name, kind and key", asy
   const r = await post(e, email);
   assert.equal(r.status, 200);
   assert.deepEqual(await r.json(), { ok: true, id: "mr-1", duplicate: false });
-  assert.deepEqual(m.calls[0], { kind: "digest", to: "Owner@Example.com", subject: "This week in the paper", text: "Hi", html: "<p>Hi</p>", fromName: "The Pull Request Post", key: "digest-abc123" });
+  assert.deepEqual(m.calls[0], { kind: "digest", to: "Owner@Example.com", subject: "This week in the paper", text: "Hi", html: "<p>Hi</p>", fromName: "The Pull Request Post", key: "digest-1" });
 });
 
 test("only the jobs may send, and only well-formed email", async () => {
