@@ -79,7 +79,7 @@ export async function handlePeople(request, env, url, user) {
     if (!GITHUB_RE.test(github)) return reply(400, { error: "That doesn't look like a GitHub username." });
     const taken = await env.DB.prepare("SELECT id, status FROM people WHERE id = ?1 OR lower(json_extract(entry, '$.github')) = ?1").bind(github.toLowerCase()).first();
     if (taken) return reply(409, { error: `@${github} is already here (${taken.status}).` });
-    if (!env.ACTIONS_TOKEN) return reply(503, { error: "Drafting needs the ACTIONS_TOKEN Worker secret (paper/SETUP.md, step C2)." });
+    if (!env.ACTIONS_TOKEN) return reply(503, { error: "Drafting needs the ACTIONS_TOKEN Worker secret (docs/cloudflare-setup.md)." });
     const status = await dispatch(env, "paper-people.yml", { request: await createRequest(env, "draft", github) });
     if (status !== 204) return reply(502, { error: `GitHub refused to start the job (${status}).` });
     await logChange(env, who, `draft requested for ${github}`).run();
