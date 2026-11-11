@@ -517,6 +517,27 @@ class FallbackRunTest(FixtureCase):
         self.assertEqual(sum(1 for line in ada["report_md"].splitlines() if line.startswith("- ")), 2)
         self.assertTrue(next(c for c in runner.calls if c["id"] == "ada-fixture")["repaired"])
 
+    def test_a_wrong_profile_is_dropped_and_the_report_kept(self):
+        def responder(system, prompt, schema, n):
+            answer = fake.respond(system, prompt, schema)
+            if "report_md" in schema["properties"] and "Ada Fixture (id: ada-fixture)" in prompt:
+                answer["profile_md"] = "# Ada\n\nSee https://ada.example.invalid/ for more."
+            return 200, MockGemini.wrap(answer)
+        mock, runner, prep, answers, front, lead_id, failed = self.run_split(responder)
+        ada = answers["ada-fixture"]
+        self.assertFalse(ada.get("fallback"))
+        self.assertNotIn("profile_md", ada)
+
+    def test_the_front_page_text_carries_no_markdown_links(self):
+        def responder(system, prompt, schema, n):
+            answer = fake.respond(system, prompt, schema)
+            if "tldr" in schema["properties"]:
+                answer["lead"]["body"] = ["Ada shipped [the tool](https://example.invalid/x)."]
+            return 200, MockGemini.wrap(answer)
+        mock, runner, prep, answers, front, lead_id, failed = self.run_split(responder)
+        files, edition = pipeline.assemble(prep, answers, front, lead_id, "m", runner.prompts, "split")
+        self.assertEqual(edition["lead"]["body"], ["Ada shipped the tool."])
+
     def test_single_mode_fills_a_missing_person_from_the_brief(self):
         mock = MockGemini()
         self.addCleanup(mock.close)

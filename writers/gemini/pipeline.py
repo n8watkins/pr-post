@@ -327,6 +327,14 @@ def check_person(answer, person, kind, input_text):
 HARD = ("not in the input", "not items of this person's brief", "is not the reader")
 
 
+PROFILE_FIELDS = ("profile_md", "profile_lines")
+
+
+def plain(text):
+    """Front-page text without Markdown links: the label stays, the address goes (the lead's sources are listed by code)."""
+    return checks.MD_LINK.sub(r"\1", text or "")
+
+
 def hard_problems(problems):
     """Problems that make an answer wrong rather than imperfect: untraceable numbers or links, or the wrong "you"."""
     return [p for p in problems if any(h in p for h in HARD)]
@@ -635,8 +643,8 @@ def assemble(prep, answers, front, lead_id, model, prompts, mode):
     lead = front["lead"]
     edition = {
         "date": date, "kind": kind, "source": model, "prompt_version": prompts["version"], "prompt_sha": prompts["sha"], "mode": mode,
-        "tldr": [capitalized(b) for b in front["tldr"]], "weather": front["weather"],
-        "lead": {"id": lead_id, "headline": lead["headline"], "deck": lead["deck"], "body": lead["body"],
+        "tldr": [capitalized(plain(b)) for b in front["tldr"]], "weather": plain(front["weather"]),
+        "lead": {"id": lead_id, "headline": plain(lead["headline"]), "deck": plain(lead["deck"]), "body": [plain(b) for b in lead["body"]],
                  "sources": lead_sources(answers[lead_id]["report_full"])},
         "stories": stories, "obituaries": obits, "births": births,
         "quote": pick_quote(prep, answers, order), "corrections": front["corrections"],
@@ -677,6 +685,10 @@ def settle(person, kind, answer, problems, input_text=""):
 
     Returns (answer or None, how: None, "repaired" or "fallback").
     """
+    if answer is not None and hard_problems(problems) and all(p.startswith(PROFILE_FIELDS) for p in hard_problems(problems)):
+        # Only the profile text is wrong: drop it (the next run drafts or extends the profile again), keep the report.
+        answer = {k: v for k, v in answer.items() if k not in PROFILE_FIELDS}
+        problems = [p for p in problems if not p.startswith(PROFILE_FIELDS)]
     if answer is not None and not hard_problems(problems):
         return answer, None
     fixed = repair(answer, person, kind, input_text) if answer is not None and input_text else None
