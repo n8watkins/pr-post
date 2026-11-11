@@ -10,6 +10,7 @@
 - The first bullet must stand alone: it is this person's line in the email.
 ```
 
+  Write each bullet as a sentence about the person or the project ("Kun added...", "Ghostty now..."), not as "project: change".
   Pick from the "Top news" list first: a new repo, a release, a video or a big speedup beats any single fix.
   Several releases of one project make one bullet ("released v0.87.0 and v0.88.0").
   Always name the project a release belongs to ("CodexBar v0.84.0", never a bare "v0.84.0"); releases with no notes share one bullet ("also released CodexBar v0.84.0 and RepoBar v0.10.4").
