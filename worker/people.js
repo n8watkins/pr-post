@@ -12,7 +12,7 @@
 //   POST   /api/email/clear             {address}: let email go to a suppressed address again
 
 import { validatePeople, GITHUB_RE } from "./lib.js";
-import { suppressedList } from "./sns.js";
+import { suppressedList } from "./email.js";
 import { createRequest, dispatch } from "./jobs.js";
 
 const ID_RE = /^[a-z0-9](?:[a-z0-9-]{0,38})$/;

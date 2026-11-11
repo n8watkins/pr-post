@@ -18,6 +18,8 @@
 //   /api/paper/* and /api/site/* with "Authorization: Bearer <token>": the jobs
 //     (JOBS_TOKEN) and the writer (WRITER_TOKEN) read and write the paper's
 //     storage, each within its own lane (worker/store.js).
+//   /api/email/send with JOBS_TOKEN: the jobs' digest and Who to follow
+//     emails, sent through mailroom or the Worker's own binding (worker/email.js).
 // With an R2 bucket bound as STORE the site is served from it (SITE_PREFIX);
 // without one, from the static assets deployed with the Worker.
 
@@ -26,6 +28,7 @@ import { handleStore, serveSite, saveActivePeople, actionUsed, serveOwnerFile } 
 import { handleSesEvents } from "./sns.js";
 import { handleJobs, scheduled, dispatch, createRequest } from "./jobs.js";
 import { handlePeople } from "./people.js";
+import { handleEmailSend } from "./email.js";
 
 const SECURITY_HEADERS = {
   "X-Robots-Tag": "noindex, nofollow",
@@ -298,6 +301,7 @@ export default {
     if (machine) {
       // A bearer token is only ever for the storage API; a wrong one is refused outright.
       if (machine === "invalid") return json(401, { error: "That token is not valid." });
+      if (url.pathname === "/api/email/send") return withHeaders(await handleEmailSend(request, env, machine));
       const jobs = await handleJobs(request, env, url, machine);
       if (jobs) return withHeaders(jobs);
       return withHeaders((await handleStore(request, env, url, machine)) || new Response(JSON.stringify({ error: "Not found." }), { status: 404, headers: { "Content-Type": "application/json" } }));
