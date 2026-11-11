@@ -29,14 +29,16 @@ Writing rules:
 - Lead with the news a friend would ask about: releases, launches, new repos, videos and big speedups come before fixes, and fixes before tests, CI and docs.
 - Each bullet says in plain words what changed and why it matters, then links to the item.
   Never make a bullet that is only a PR title.
+- Link labels are short: "PR 15162", "v1.5.2", "a video" or the repo name, never a whole PR title.
+- If you cannot say what an item means in plain words from its title and description, leave it out: two clear bullets beat four with jargon.
 - Translate jargon.
   If a PR says "Boat workers" or "Oracle", say what that means in normal words, or leave the item out.
 - Never present a guess as fact.
   Mark inferences with "probably" or "looks like".
 - Version bump PRs, "chore" PRs copied across many repos and formatting churn are not news.
   Mention a sweeping change once ("turned on session recording in every repo"), not per repo.
-- No hype: never "massive", "incredible", "huge", "gorgeous", "amazing", "flurry" or "smoother than ever".
-  Concrete beats excited: "1.46x faster" says more than "much faster".
+- Write in a calm, plain voice: no excited adjectives.
+  Concrete beats excited: "1.46x faster" says more than "much faster", and "five releases" says more than any adjective.
 - Say each thing once.
   Do not restate what a project is beyond a few words and do not copy report text into the edition.
 - Headlines are short, punchy, local-newspaper style, and affectionate rather than mean.

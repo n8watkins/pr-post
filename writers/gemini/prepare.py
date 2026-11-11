@@ -199,8 +199,9 @@ def busiest(brief_text):
 
 # News value, used to order what each report should lead with. A rough, code-only
 # reading of titles: it never decides what is written, only what comes first.
-STRONG = re.compile(r"(\b\d+(\.\d+)?x (faster|smaller|less)\b|\bhalve[sd]?\b|\blaunch\w*|\bfirst release\b|\binitial (public )?release\b|"
-                    r"\bprepare for v?\d+\.0|(?<![\d.])v?[1-9]\d*\.0(\.0)?\b(?![.-])|\bintroduc\w+)", re.I)
+STRONG = re.compile(r"(\b\d+(\.\d+)?x (faster|smaller|less)\b|\bhalve[sd]?\b|(?<!\bat )(?<!\bon )\blaunch(es|ed|ing)?\b(?! contract)|"
+                    r"\bfirst release\b|\binitial (public )?release\b|\bprepare for v?\d+\.0|\brelease prep\b.*\d+\.\d+|"
+                    r"(?<![\d.])v?[1-9]\d*\.0(\.0)?\b(?![.-])|\bintroduc\w+)", re.I)
 MEDIUM = re.compile(r"\b(faster|speed ?up|speeds? up|quicker|release[sd]?|publish\w*|new|support\w*|add\w*|ship\w*|redesign\w*)\b", re.I)
 FEATURE = re.compile(r"^feat\b", re.I)
 SMALL = re.compile(r"^(chore|ci|test|tests|docs?|style|build|deps|lint|bump|typo|format|refactor)\b|\b(bump|chore|typo|lint|"

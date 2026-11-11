@@ -209,6 +209,13 @@ QUIET_RE = re.compile(r"^\s*quiet since\b", re.I)
 NEWS_SCORE = 8  # a highlight this newsworthy (a release, new repo, video or headline PR) must not be called quiet
 OWN_WORDS = 4   # a bullet must say at least this much in its own words, not only a linked title
 TOP_CHOICES = 3  # the report must cover at least one of the top items prepare.py ranked
+LABEL_WORDS = 6  # a link label longer than this is a pasted title
+
+
+def release_only(bullet):
+    """A bullet that only announces releases: a release with no notes has nothing more to say than its project and version."""
+    urls = checks.link_urls(bullet)
+    return bool(urls) and all("/releases/" in u for u in urls) and checks.words_outside_links(bullet) >= 2
 
 
 def brief_urls(person):
@@ -269,10 +276,14 @@ def check_person(answer, person, kind, input_text):
         if unlinked:
             problems.append(f"every bullet needs a Markdown link to its item in the brief; these have none: "
                             + "; ".join(f"\"{b[:60]}\"" for b in unlinked[:3]))
-        bare = [b for _, b in item_bullets if checks.link_urls(b) and checks.words_outside_links(b) < OWN_WORDS]
+        bare = [b for _, b in item_bullets if checks.link_urls(b) and not release_only(b) and checks.words_outside_links(b) < OWN_WORDS]
         if bare:
             problems.append("these bullets are only a linked title; say in plain words what changed and why it matters, then link: "
                             + "; ".join(f"\"{b[:60]}\"" for b in bare[:3]))
+        long_labels = [label for _, b in item_bullets for label, _ in checks.MD_LINK.findall(b) if checks.words(label) > LABEL_WORDS]
+        if long_labels:
+            problems.append("link labels must be short (\"PR 15162\", \"v1.5.2\", the repo name), not whole titles: "
+                            + "; ".join(f"\"{label[:60]}\"" for label in long_labels[:3]))
         if kind == "update":
             if not 2 <= len(bl) <= 4 and sum(1 for _ in person.get("items") or []) > 1:
                 problems.append(f"the update has {len(bl)} bullets; write 2 to 4")
@@ -414,6 +425,12 @@ def clip_text(text, limit=90):
     return text + ("..." if cut else "")
 
 
+def sentence(text):
+    """Text ending in one stop: clipped text keeps its "...", anything else gets a period."""
+    text = (text or "").strip()
+    return text if not text or text.endswith(("...", ".", "!", "?")) else text + "."
+
+
 def link_label(text):
     return clip_text(text, 60).replace("[", "(").replace("]", ")")
 
@@ -520,10 +537,11 @@ def births_and_obituaries(prep):
         for i in p["items"]:
             if i["kind"] == "birth":
                 when = f", {short_day(i['date'])}" if i["date"] else ""
-                what = clip_text(i["title"], 120)
-                births.append((i["date"], {"repo": i["repo"], "text": f"To {p['name']}{when}." + (f" {what}." if what else "")}))
+                what = sentence(clip_text(i["title"], 120))
+                births.append((i["date"], {"repo": i["repo"], "text": f"To {p['name']}{when}." + (f" {what}" if what else "")}))
         for g in p["archived"]:
-            obits.append({"name": g["repo"].split("/")[-1], "url": g["url"], "text": f"{p['name']}'s repo, archived or no longer public."})
+            whose = "Your repo" if p["self"] else f"{p['name']}'s repo"
+            obits.append({"name": g["repo"].split("/")[-1], "url": g["url"], "text": f"{whose}, archived or no longer public."})
     births.sort(key=lambda t: t[0], reverse=True)
     return [b for _, b in births], obits
 

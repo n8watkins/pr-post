@@ -25,7 +25,7 @@ def _person_answer(name, block, schema_props, required, weekly):
     items = items or _items(block)
     first = items[0] if items else None
     second = items[1] if len(items) > 1 else first
-    link = lambda i: f"[{i['title']}]({i['url']})" if i else "their repos"
+    link = lambda i: f"[{' '.join(i['title'].split()[:3])}]({i['url']})" if i else "their repos"
     you = "Voice: Second person" in block or "This person is the reader" in block
     who = "You" if you else name
     if weekly:
