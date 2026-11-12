@@ -285,7 +285,7 @@ class BasePath(unittest.TestCase):
             tmp, _, out, feed = build_fixture()
         self.addCleanup(tmp.cleanup)
         front = (out / "index.html").read_text()
-        self.assertIn('href="/pr-post/assets/style.css"', front)
+        self.assertRegex(front, r'href="/pr-post/assets/style\.css\?v=[0-9a-f]{10}"')
         self.assertIn('href="/pr-post/p/octo/"', front)
         root_links = re.findall(r'(?:href|src)="(/[^"]*)"', front)
         self.assertTrue(root_links and all(l.startswith("/pr-post/") for l in root_links), root_links)
