@@ -20,7 +20,7 @@ from . import api, checks, prepare
 from .prepare import QUOTABLE
 
 PROMPTS = Path(__file__).resolve().parent / "prompts"
-PROMPT_VERSION = "v2"
+PROMPT_VERSION = "v3"
 PREVIOUS_ANSWER_LIMIT = 8000
 
 STORY = {"type": "OBJECT", "properties": {"beat": {"type": "STRING"}, "headline": {"type": "STRING"}, "summary": {"type": "STRING"}},
@@ -166,13 +166,35 @@ def project_for(person, repo):
     return None
 
 
-def top_news_text(person):
+def news_line(h):
+    ref = f"[{h['id']}] " if h["id"] else ""
+    return f"- {ref}{h['label']}: {h['repo']} {h['title']} | link: {link_for(h['url'])}".replace("  ", " ")
+
+
+def top_news_text(person, skip=()):
     """The window's most newsworthy items, best first, computed in prepare.py, as lines for the prompt, each with its link."""
-    lines = []
-    for h in person.get("highlights") or []:
-        ref = f"[{h['id']}] " if h["id"] else ""
-        lines.append(f"- {ref}{h['label']}: {h['repo']} {h['title']} | link: {link_for(h['url'])}".replace("  ", " "))
+    lines = [news_line(h) for h in person.get("highlights") or [] if h not in skip]
     return "\n".join(lines) if lines else "(nothing stands out)"
+
+
+MUST_COVER = 2  # the report must cover each of the first this many highlights that are real news
+
+
+def must_cover(person):
+    """The highlights a report may not leave out: the first MUST_COVER ranked items, when each is real news
+    (a release, a new repo, a video or a headline PR), never an archived repo (those are listed by code)."""
+    tops = [h for h in person.get("highlights") or [] if h["kind"] != "archived"][:MUST_COVER]
+    out = []
+    for h in tops:
+        if h["score"] < NEWS_SCORE:
+            break
+        out.append(h)
+    return out
+
+
+def must_cover_text(person):
+    lines = [news_line(h) for h in must_cover(person)]
+    return "\n".join(lines) if lines else "(nothing: pick from the list below)"
 
 
 def projects_text(person):
@@ -197,6 +219,7 @@ def person_block(prompts, person, kind):
                 end_long=long_day(person["end"]), title=title_for(person, kind)[2:], known_for=person["known_for"] or "(not given)",
                 notes="\n".join(notes) + ("\n" if notes else ""), profile=person.get("profile") or "(none yet)",
                 brief=linked_brief(person["brief"]), perspective=perspective(person), top_news=top_news_text(person),
+                must_cover=must_cover_text(person), other_news=top_news_text(person, skip=must_cover(person)),
                 projects=projects_text(person), first_name=first_name(person), bullet_words=checks.BULLET_WORDS,
                 cap=checks.CAPS[kind], label_words=LABEL_WORDS)
 
@@ -239,7 +262,7 @@ def email_line(report):
 
 def lead_why(person):
     """Why code picked this person to lead: their biggest items, as plain lines (no links: the front page has none)."""
-    tops = [h for h in person.get("highlights") or [] if h["kind"] != "archived"][:prepare.LEAD_ITEMS]
+    tops = lead_items(person)
     return "\n".join(f"- {h['label']}: {h['repo'].split('/')[-1]} {h['title']}".rstrip() for h in tops) or "- (their report)"
 
 
@@ -285,11 +308,119 @@ LABEL_WORDS = 6  # a link label longer than this is a pasted title
 SLUG_START = re.compile(r"^\[?[\w.-]+/[\w.-]+\b")  # a bullet that opens with "owner/repo" reads like a log, not a sentence
 
 
+LABEL_START = re.compile(r"^\[?[\w.-]+\]?:\s")  # "Ghostty: sped up..." is a log line, not a sentence
+COUNT = re.compile(r"\b\d[\d,]*\+?\s+(?:merged\s+|opened\s+|public\s+|private\s+)?"
+                   r"(?:PRs?|pull requests?|commits?|repos?|repositories|releases?|contributions?)\b", re.I)
+COUNTS_ONLY = 2  # a bullet with this many counts in it is a Numbers line, not news
+# Claims of purpose or quality that a model adds on its own; each is fine only when the source says it.
+ADDED_CLAIM = re.compile(r"\b(designed to|aims? to|meant to|so (?:users|people) can|easier|simpler|cleaner|smoother|nicer|"
+                         r"friendlier|seamless\w*|streamlin\w*|powerful|robust|intuitive|polished|richer|better|"
+                         r"more reliable|more stable)\b", re.I)
+FOLD = re.compile(r"\b(alongside|along with|together with|also brought|as part of|bundled|plus (?:a |the )?new)\b", re.I)
+# Words that say nothing about what changed: generic verbs and glue. A bullet about a PR needs words beyond these and the title.
+PLAIN = set("""a an the and or but of to in on for with by from at as is are was were be been it its this that these those
+their his her they them he she now new also into over so not no via after before when while which who what how than then
+there more most less one two three some several batch few many same other each every all just only still own up out off
+merged merge merges added add adds fixed fix fixes shipped ship ships updated update updates landed land made make makes
+improved improve improves changed change changes worked work works tweaked moved pr prs commit commits release released
+releases project repo repository code week this window can support supports titled received brought prepared built
+taught""".split())
+RESTATE_MIN = 1  # a bullet about a PR or commit says at least this many words of its own beyond the item titles
+
+
+def item_words(text):
+    return [w.lower().strip("'.-") for w in re.findall(r"[\w'][\w'.-]*", text or "")]
+
+
+def in_vocab(word, vocab):
+    """Whether `word` is in `vocab`, allowing a shared stem ("logged"/"log", "repeats"/"repeat")."""
+    if word in vocab:
+        return True
+    return any(len(v) >= 3 and len(word) >= 3 and (word.startswith(v) or v.startswith(word)) and abs(len(word) - len(v)) <= 3
+               for v in vocab)
+
+
+def restates_title(bullet, person):
+    """Whether a bullet about PRs or commits only restates titles: it must explain in words of its own (from the PR
+    description, the project line or plain English), not reword "fix(x): reset per-task markers" as "reset per-task markers"."""
+    urls = {u.rstrip("/") for u in checks.link_urls(bullet)}
+    linked = [i for i in person.get("items") or [] if (i.get("url") or "").rstrip("/") in urls]
+    if not linked or any(i["kind"] not in ("pr", "open_pr", "commit") for i in linked):
+        return False
+    vocab = set(PLAIN)
+    for i in person.get("items") or []:
+        if i["kind"] in ("pr", "open_pr", "commit"):
+            vocab |= set(item_words(i["title"]))
+        vocab |= set(item_words((i.get("repo") or "").replace("/", " ")))
+    vocab |= set(item_words(person.get("name", ""))) | set(item_words(person.get("id", "")))
+    own = [w for w in item_words(MD_LINK_ANY.sub(" ", bullet)) if w and not w.isdigit() and not in_vocab(w, vocab)]
+    return len(own) < RESTATE_MIN
+
+
+MD_LINK_ANY = re.compile(r"\[[^\]]*\]\(\S+?\)")
+
+
+def birth_descriptions(person):
+    return {short_repo(i["repo"]): i["title"] for i in person.get("items") or [] if i["kind"] == "birth" and i.get("repo")}
+
+
+def own_names(person):
+    return {w.lower() for w in item_words(person.get("name", ""))} | {person.get("id", "").lower()}
+
+
+def project_names(person):
+    """{short repo name: is it a new repo} for every repo in the person's window."""
+    out = {}
+    for i in person.get("items") or []:
+        name = short_repo(i.get("repo") or "")
+        if name:
+            out[name] = out.get(name, False) or i["kind"] == "birth"
+    return out
+
+
+def named(text, name):
+    return re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", text or "", re.I) is not None
+
+
+def folds_new_repo(text, names, descriptions=None, own=()):
+    """Whether `text` puts a new repo into a sentence about another project ("Datasette 1.0a42, plus new sqlite-dateutil").
+
+    A name that only appears inside a new repo's own description ("wrapvm: wrap's base image + XFCE") or that is the
+    person's own name (a repo called "kun") does not count as another project.
+    """
+    plain_text = MD_LINK_ANY.sub(lambda m: m.group(0).split("](")[0], text)
+    said = {n for n in names if n.lower() not in own and named(plain_text, n)}
+    births = {n for n in said if names[n]}
+    quoted = " ".join((descriptions or {}).get(b, "") for b in births)
+    others = {n for n in said - births if not named(quoted, n)}
+    return bool(births) and bool(others)
+
+
+def added_claims(text, source):
+    """Purpose or quality words ("designed to", "cleaner") the text adds that its source never says."""
+    src = (source or "").lower()
+    return sorted({m.group(0).lower() for m in ADDED_CLAIM.finditer(checks.strip_urls(text or "")) if m.group(0).lower() not in src})
+
+
+def person_source(person):
+    """What a person's report may draw on: the brief, the profile and the "Who they are" line."""
+    return "\n".join([person.get("brief") or "", person.get("profile") or "", person.get("known_for") or "",
+                      "\n".join(p["what"] for p in person.get("projects") or [])])
+
+
 def release_only(bullet, archived=()):
     """A bullet that only announces releases or archived repos: with no notes there is nothing more to say than the name."""
     urls = checks.link_urls(bullet)
     gone = {u.rstrip("/") for u in archived}
     return bool(urls) and all("/releases/" in u or u.rstrip("/") in gone for u in urls) and checks.words_outside_links(bullet) >= 2
+
+
+def names_release(highlight, body):
+    """Whether a report names a release without linking it ("also released CodexBar v0.84.0 and RepoBar v0.10.4")."""
+    if highlight["kind"] != "release":
+        return False
+    versions = re.findall(r"v?\d+(?:\.\w+)+", highlight["title"] or "")
+    return named(body, short_repo(highlight["repo"])) and any(v.lstrip("v") in body for v in versions)
 
 
 def brief_urls(person):
@@ -405,7 +536,8 @@ def check_person(answer, person, kind, input_text):
         if unlinked:
             problems.append(f"every bullet needs a Markdown link to its item in the brief; these have none: "
                             + "; ".join(f"\"{b[:60]}\"" for b in unlinked[:3]))
-        bare = [b for _, b in item_bullets if checks.link_urls(b) and not release_only(b, [g["url"] for g in person.get("archived") or []]) and checks.words_outside_links(b) < OWN_WORDS]
+        gone = [g["url"] for g in person.get("archived") or []]
+        bare = [b for _, b in item_bullets if checks.link_urls(b) and not release_only(b, gone) and checks.words_outside_links(b) < OWN_WORDS]
         if bare:
             problems.append("these bullets are only a linked title; say in plain words what changed and why it matters, then link: "
                             + "; ".join(f"\"{b[:60]}\"" for b in bare[:3]))
@@ -417,6 +549,26 @@ def check_person(answer, person, kind, input_text):
         if long_labels:
             problems.append("link labels must be short (\"PR 15162\", \"v1.5.2\", the repo name), not whole titles: "
                             + "; ".join(f"\"{label[:60]}\"" for label in long_labels[:3]))
+        labelled = [b for _, b in item_bullets if LABEL_START.match(b)]
+        if labelled:
+            problems.append("write each bullet as a sentence with the person or project as its subject (\"Kun added...\", "
+                            "\"Ghostty now...\"), not as \"project: change\": " + "; ".join(f"\"{b[:50]}\"" for b in labelled[:3]))
+        counts = [b for _, b in item_bullets if len(COUNT.findall(b)) >= COUNTS_ONLY]
+        if counts:
+            problems.append("a bullet only repeats the Numbers line; use one count inside a bullet about the work it counts, "
+                            "or drop it: " + "; ".join(f"\"{b[:60]}\"" for b in counts[:2]))
+        restated = [b for _, b in item_bullets if restates_title(b, person)]
+        if restated:
+            problems.append("these bullets only reword a PR or commit title; say what the project is (from its line) and, from the "
+                            "PR's description, what a user notices; if the brief says no more, pick another item, but never add a "
+                            "benefit the brief does not state: "
+                            + "; ".join(f"\"{b[:70]}\"" for b in restated[:3]))
+        names = project_names(person)
+        folded = [b for _, b in item_bullets if folds_new_repo(b, names, birth_descriptions(person), own_names(person))
+                  and not release_only(b, gone)]
+        if folded:
+            problems.append("a new repo is its own news: give it its own bullet instead of adding it to another project's: "
+                            + "; ".join(f"\"{b[:60]}\"" for b in folded[:2]))
         if kind == "update":
             if not 2 <= len(bl) <= 4 and sum(1 for _ in person.get("items") or []) > 1:
                 problems.append(f"the update has {len(bl)} bullets; write 2 to 4")
@@ -429,9 +581,17 @@ def check_person(answer, person, kind, input_text):
         if top and top[0]["score"] >= NEWS_SCORE and not (covers(top[0], urls) or len(covered) >= min(2, len(top))):
             problems.append("the report leaves out the biggest news; cover the first of these, or two of them, first: "
                             + "; ".join(f"{h['label']} {h['repo']} {h['title'][:60]} <{h['url']}>" for h in top))
+        else:
+            missed = [h for h in must_cover(person) if not (covers(h, urls) or names_release(h, body))]
+            if missed:
+                problems.append("the report leaves out news it must cover; give each of these its own bullet: "
+                                + "; ".join(f"{h['label']} {h['repo']} {h['title'][:60]} <{h['url']}>" for h in missed))
     hyped = checks.hype(written)
     if hyped:
         problems.append(f"no hype words ({', '.join(hyped)}); say plainly what changed")
+    added = added_claims(written, person_source(person)) if "brief" in person else []
+    if added:
+        problems.append(f"the report adds claims its sources never make ({', '.join(added)}); say only what the brief says")
     return problems
 
 
@@ -457,14 +617,46 @@ def edition_text(answer):
                       *lead.get("body", []), *answer.get("corrections", [])])
 
 
-def check_edition(answer, input_text, lead_report=""):
+def lead_items(person):
+    """The items that won the lead, as lead_why lists them."""
+    return [h for h in person.get("highlights") or [] if h["kind"] != "archived"][:prepare.LEAD_ITEMS]
+
+
+def check_lead(lead, person):
+    """The lead keeps each winning project separate and named, and adds no purpose or quality its sources lack."""
+    problems = []
+    text = "\n".join([lead.get("deck", ""), *lead.get("body", [])])
+    repos = []
+    for h in lead_items(person):
+        name = short_repo(h["repo"])
+        if name and name not in repos:
+            repos.append(name)
+    if len(repos) > 1:
+        unnamed = [n for n in repos if not named(text, n)]
+        if unnamed:
+            problems.append(f"the lead must name each of its projects ({', '.join(repos)}); it leaves out {', '.join(unnamed)}")
+        folds = sorted({m.group(0).lower() for m in FOLD.finditer(text)})
+        if folds:
+            problems.append(f"the lead joins separate projects ({', '.join(folds)}); give each project its own sentence")
+    added = added_claims(text, person_source(person))
+    if added:
+        problems.append(f"the lead adds claims its sources never make ({', '.join(added)}); say only what the lead report says")
+    return problems
+
+
+def check_edition(answer, input_text, lead_report="", lead_person=None):
     """Checks for the front page; `lead_report` is the lead's report, which the lead must retell, not copy."""
     problems = []
     lead = answer.get("lead") or {}
+    if lead_person is not None:
+        problems += check_lead(lead, lead_person)
     linked = [s for s in [*answer.get("tldr", []), lead.get("deck", ""), *lead.get("body", [])] if checks.MD_LINK.search(s or "")]
     if linked:
         problems.append("the front page is plain text: no Markdown links in the TL;DR, deck or lead body (the sources are added by code)")
     copied = checks.copied_runs("\n".join([lead.get("deck", ""), *lead.get("body", [])]), lead_report) if lead_report else []
+    if lead_person is not None:
+        source = " " + " ".join(re.findall(r"[\w']+", person_source(lead_person).lower())) + " "
+        copied = [g for g in copied if f" {g} " not in source]
     if copied:
         problems.append("the lead copies the report word for word (\"" + "\"; \"".join(copied[:2]) + "\"); retell it in new sentences")
     for i, b in enumerate(answer.get("tldr") or []):
@@ -830,7 +1022,8 @@ def run_split(runner, prep, previous):
         return answers, None, None, failed
     lead_id = choose_lead(prep, answers)
     req = edition_request(prompts, prep, answers, lead_id, previous)
-    front, _ = runner.run(req, lambda a: check_edition(normalize_front(a), req["prompt"], answers[lead_id]["report_md"]))
+    lead_person = next(p for p in prep["people"] if p["id"] == lead_id)
+    front, _ = runner.run(req, lambda a: check_edition(normalize_front(a), req["prompt"], answers[lead_id]["report_md"], lead_person))
     if front is None:
         failed.append("edition")
     return answers, front, lead_id, failed

@@ -660,6 +660,95 @@ class FewerRetriesTest(FixtureCase):
         self.assertEqual(prepare.trim(upstream, dt.date(2026, 11, 7), SATURDAY)[1], prepare.trim(TrimTest.BRIEF, dt.date(2026, 11, 7), SATURDAY)[1])
 
 
+class V3ChecksTest(unittest.TestCase):
+    """The checks behind prompts v3: sentences not labels, explanations not reworded titles, must-cover news,
+    no bullet of bare counts, a new repo kept apart, no added claims, and a lead that names each project."""
+
+    G = "https://github.com/ada/"
+    ITEMS = [
+        {"id": "i1", "kind": "birth", "repo": "ada/beeper", "title": "Find beeps in a noisy room", "url": G + "beeper", "date": "2026-11-09"},
+        {"id": "i2", "kind": "video", "repo": "", "title": "A tour of my desk", "url": "https://www.youtube.com/watch?v=abc", "date": "2026-11-08"},
+        {"id": "i3", "kind": "release", "repo": "ada/acme", "title": "v2.0.0", "url": G + "acme/releases/tag/v2.0.0", "date": "2026-11-08"},
+        {"id": "i4", "kind": "pr", "repo": "ada/acme", "title": "fix: reset per-task watch markers at idle-session boundaries",
+         "url": G + "acme/pull/7", "date": "2026-11-08"},
+    ]
+
+    def setUp(self):
+        hl = lambda i, score: {"id": i["id"], "kind": i["kind"], "label": prepare.KIND_LABEL[i["kind"]], "repo": i["repo"],
+                               "title": i["title"], "url": i["url"], "score": score}
+        brief = "\n".join(f"- [{i['id']}] {i['repo']} {i['title']} <{i['url']}>" for i in self.ITEMS)
+        brief += "\nWindow 2026-11-07 to 2026-11-11.\n## Numbers\n- 120 merged PRs, 300 commits, 9 repos touched.\n- When a session is away, its stale timers no longer stall the queue.\n"
+        self.ada = {"id": "ada", "name": "Ada Example", "self": False, "start": "2026-11-07", "end": "2026-11-11", "items": self.ITEMS, "archived": [], "profile": "", "known_for": "",
+                    "projects": [{"name": "acme", "repo": "ada/acme", "what": "a build tool for small teams"}], "brief": brief,
+                    "highlights": [hl(self.ITEMS[0], 9), hl(self.ITEMS[1], 8), hl(self.ITEMS[2], 8), hl(self.ITEMS[3], 5)]}
+        self.v = f"[video]({self.ITEMS[1]['url']})"
+        self.b = f"[beeper]({self.ITEMS[0]['url']})"
+
+    def problems(self, body):
+        answer = {"report_md": body, "story": {"beat": "Tools desk", "headline": "Ada ships", "summary": "Ada had a week."}}
+        return pipeline.check_person(answer, self.ada, "update", self.ada["brief"])
+
+    def good(self):
+        return (f"- Ada started beeper, a new repo to find beeps in a noisy room {self.b}.\n"
+                f"- Ada posted a video on a tour of her desk {self.v}.\n")
+
+    def test_the_good_report_passes(self):
+        self.assertEqual(self.problems(self.good()), [])
+
+    def test_must_cover_is_the_first_two_real_news_items(self):
+        self.assertEqual([h["id"] for h in pipeline.must_cover(self.ada)], ["i1", "i2"])
+        body = f"- Ada started beeper, a new repo to find beeps in a noisy room {self.b}.\n- Ada released acme 2.0, the build tool [v2.0.0]({self.ITEMS[2]['url']}).\n"
+        self.assertTrue(any("must cover" in p and "youtube" in p for p in self.problems(body)))
+        req = pipeline.person_request(pipeline.load_prompts("v3"), {"kind": "update", "reader": "Sol"}, self.ada)
+        must = req["prompt"].split("#### Must cover")[1].split("####")[0]
+        self.assertIn("[i1]", must)
+        self.assertIn("[i2]", must)
+        self.assertNotIn("[i3]", must)
+
+    def test_a_release_named_without_its_link_is_covered(self):
+        self.ada["highlights"][1] = {**self.ada["highlights"][2]}
+        body = f"- Ada started beeper, a new repo to find beeps in a noisy room {self.b}.\n- Ada also released acme v2.0.0 and more {self.b}.\n"
+        self.assertFalse(any("must cover" in p for p in self.problems(body)))
+
+    def test_project_colon_change_is_not_a_sentence(self):
+        body = self.good() + f"- beeper: now finds beeps in the kitchen {self.b}.\n"
+        self.assertTrue(any("not as \"project: change\"" in p for p in self.problems(body)))
+
+    def test_a_bullet_of_counts_fails(self):
+        body = self.good() + f"- This week brought 120 merged PRs and 300 commits across 9 repos [PR 7]({self.ITEMS[3]['url']}).\n"
+        self.assertTrue(any("only repeats the Numbers line" in p for p in self.problems(body)))
+
+    def test_a_reworded_title_fails_and_an_explanation_passes(self):
+        pr = f"[PR 7]({self.ITEMS[3]['url']})"
+        reworded = self.good() + f"- Ada reset per-task watch markers at idle-session boundaries {pr}.\n"
+        self.assertTrue(any("only reword" in p for p in self.problems(reworded)))
+        self.assertTrue(pipeline.restates_title(f"acme: resets the per-task watch markers at idle-session boundaries {pr}", self.ada))
+        explained = self.good() + f"- Ada fixed acme so stale timers from an away session no longer stall the queue {pr}.\n"
+        self.assertFalse(any("only reword" in p for p in self.problems(explained)))
+        self.assertFalse(pipeline.restates_title(f"Ada shipped acme v2.0.0 [v2.0.0]({self.ITEMS[2]['url']}).", self.ada))
+
+    def test_a_new_repo_gets_its_own_bullet(self):
+        body = self.good() + f"- Ada released acme v2.0.0 for teams, plus the new beeper repo [v2.0.0]({self.ITEMS[2]['url']}) {self.b}.\n"
+        self.assertTrue(any("its own bullet" in p for p in self.problems(body)))
+        self.assertFalse(pipeline.folds_new_repo("Also released [acme v2.0.0](x) and [beeper v0.1](y).", {"acme": False}))
+
+    def test_claims_the_source_never_makes_fail(self):
+        body = self.good().replace("a noisy room", "a noisy room, designed to make audio cleaner")
+        self.assertTrue(any("cleaner, designed to" in p for p in self.problems(body)))
+        self.assertEqual(pipeline.added_claims("A smaller build tool for small teams.", self.ada["brief"] + "small"), [])
+
+    def test_the_lead_names_each_project_and_keeps_them_apart(self):
+        folded = {"deck": "Ada had a week.", "body": ["Acme 2.0 arrived alongside a tool for finding beeps, designed to help."]}
+        problems = pipeline.check_lead(folded, self.ada)
+        self.assertTrue(any("must name each" in p and "beeper" in p for p in problems))
+        self.assertTrue(any("alongside" in p for p in problems))
+        self.assertTrue(any("designed to" in p for p in problems))
+        apart = {"deck": "Ada started beeper.", "body": ["Ada started beeper, a repo to find beeps in a noisy room.",
+                                                         "Separately, Ada released acme v2.0.0."]}
+        self.ada["highlights"] = [h for h in self.ada["highlights"] if h["kind"] != "video"]
+        self.assertEqual(pipeline.check_lead(apart, self.ada), [])
+
+
 class FallbackRunTest(FixtureCase):
     kind = "update"
     day = WEDNESDAY
