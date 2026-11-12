@@ -33,6 +33,14 @@ That page is what the email digest links to; the digest itself carries only the 
 `data/<id>.json` can run to hundreds of kilobytes for a busy person, and an AI writer pays for every byte it reads on every later step, so reading briefs instead is the biggest single saving.
 Commit `briefs/` with `data/` and `stats/`.
 
+Each brief is cut to that person's report window and opens with it, as in `Window: 2026-11-07 to 2026-11-11 (since the 2026-11-07 weekly), for a midweek update.`
+The window ends on the collection date; a weekly report (Saturday) starts at the newest weekly report or 7 days back, and a midweek update at the newest report of either kind or 4 days back, both ends included.
+Every writer therefore reads the same items, and none repeats what an earlier report covered; the Gemini writer applies the same rule, and `tests/test_brief.py` checks that the two agree.
+`python3 scripts/brief.py --kind weekly` cuts the briefs for the other kind of run.
+
+The Claude routine ends each run with `scripts/writer_usage.py`, which stores `logs/writer-usage/<date>-claude.json`: start and finish time, turns, the files it read and their bytes, what it wrote, and tokens when the model was told them (otherwise `null`).
+Pass that file to `python3 -m tools.compare unblind --claude-usage` for the cost table.
+
 [INSTRUCTIONS.md](../INSTRUCTIONS.md) describes each file's format in detail.
 The summaries file looks like this:
 
@@ -117,13 +125,19 @@ Without `--verbose` it prints counts only, like `scripts/store.py`, because Acti
 0. **Prepare, in code.** For each person, the window follows [paper/INSTRUCTIONS.md](../paper/INSTRUCTIONS.md) step 1 (weekly: since the newest weekly report, or 7 days; midweek: since the newest report of either kind, or 4 days), counting only reports dated before the run.
    The brief is trimmed to that window, and each kept item gets an id such as `i4`.
    A missing brief, or one collected more than 24 hours before the run, is skipped, as the instructions say.
+   Trimming a brief that was already trimmed to the window changes nothing, so briefs built per window upstream work the same.
    A person with nothing in the window is quiet: they get a one-line report from a template and no request.
-   Active people get their profile attached.
-1. **One request per active person**, answering `{report_md, story {beat, headline, summary}, profile_lines[], lead_score, quote_candidate_ids[]}` (plus `profile_md` when they have no profile yet).
+   Active people get their profile attached, plus one line on what each project of their profile's "Active projects" is, for the projects the window touches, so a bullet can say what a project is.
+   Code also ranks each person's items by news value (new repos, releases, videos, headline speedups, release prep) and picks the front-page lead: the biggest ranked news (the top item counted twice, plus the next two) and a capped bonus for the brief's Numbers (merged PRs, releases) and launches.
+   The reader leads only when their value beats everyone else's by a clear margin, since they already know what they shipped.
+1. **One request per active person**, answering `{report_md, story {beat, headline, summary}, profile_lines[], quote_candidate_ids[]}` (plus `profile_md` when they have no profile yet).
+   Each item in the brief ends with the exact Markdown link to use, short label included (`[PR 15162](...)`, `[CodexBar v0.84.0](...)`), and the request ends with a short checklist (links, word caps, voice, the JSON shape), so first answers pass more often.
 2. **One edition request** that sees only stage 1's answers, not the briefs: `tldr`, `lead` (headline, deck, body), `weather` and `corrections` (checked against the previous Gemini edition's "probably" guesses).
-3. **Assemble, in code.** The lead is the highest `lead_score`; births and obituaries come from the briefs; the quote of the week is copied by code from `data/<id>.json` by item id, so it is never model-written; quiet people get their template line and a quiet story.
+   It is told who leads and which items won it; the model only writes the lead.
+3. **Assemble, in code.** The lead is the one code picked (the next best when their report failed); births and obituaries come from the briefs; the quote of the week is copied by code from `data/<id>.json` by item id, so it is never model-written; quiet people get their template line and a quiet story.
    A midweek edition keeps the lead and three stories.
 4. **Check, in code.** Word caps (weekly report 250, update 120, front page 400, TL;DR bullets 15, story summaries 30), the JSON shape, every number printed must appear in the request's input, and every link must be an address from the input.
+   Before checking, code fixes what needs no model: a pasted title as a link label becomes the label its address calls for, a midweek update keeps its first four bullets, and Markdown links on the front page become plain text.
    On a failure the request is sent once more with the problems listed; whatever still fails is kept and recorded, so the comparison shows it.
    Em dashes are replaced with hyphens.
 5. **Save** under `gemini/` in the paper, and push that folder with `scripts/store.py push` when the folder was pulled with it (`--no-push` keeps it local).
@@ -137,7 +151,7 @@ Without `--verbose` it prints counts only, like `scripts/store.py`, because Acti
 | `gemini/usage/<date>.json` | Requests, retries, input, output and thinking tokens (from `usageMetadata`), latency, checks still failing |
 | `gemini/single/...` | The same for variant B (`--single`), so both variants can run on one snapshot |
 
-The prompts are files in `writers/gemini/prompts/v1/`, built from the writing rules and formats in `paper/INSTRUCTIONS.md` (not its tool or file steps).
+The prompts are files in `writers/gemini/prompts/v2/` (the default; `v1/` is kept as the baseline), built from the writing rules and formats in `paper/INSTRUCTIONS.md` (not its tool or file steps).
 Change them by adding a new version folder and passing `--prompt-version`, so every output records which prompts wrote it.
 
 The paper's storage accepts `gemini/` and `reviews/` from the jobs token, and the owner can read them at `/files/gemini/...` after sign-in.
@@ -156,15 +170,49 @@ Use a paid tier (a Cloud Billing account on the API key's project), where inputs
 
 ```sh
 python3 -m tools.compare packet --paper work/ --date 2026-11-14                 # Claude ("") against gemini; --b gemini/single for variant B
-# a Claude agent reviews work/.compare/2026-11-14/packet.md following tools/compare/REVIEWER.md, writing review.md beside it
-python3 -m tools.compare unblind --paper work/ --date 2026-11-14 --push        # -> reviews/2026-11-14.md in the paper
+# reviewer 1: a Claude agent reviews work/.compare/2026-11-14/packet.md following tools/compare/REVIEWER.md, writing review-claude.md beside it
+pass-env run -- python3 -m tools.compare review --reviewer gemini --paper work/ --date 2026-11-14   # reviewer 2 -> review-gemini.md
+python3 -m tools.compare score --paper work/ --date 2026-11-14                  # points per writer, both reviewers, still blind
+python3 -m tools.compare unblind --paper work/ --date 2026-11-14 --push        # -> reviews/2026-11-14-claude-vs-gemini.md in the paper
 ```
 
 The packet holds the trimmed briefs, then each writer's reports and edition labelled Writer A and Writer B in a random order, with every field that names a model removed.
 The mapping goes to `.compare/<date>.key.json`, outside the folder the reviewer reads; `.compare/` is never pushed.
 [tools/compare/REVIEWER.md](../tools/compare/REVIEWER.md) is the reviewer's prompt: missed news, untraceable facts, numbers that do not match the brief, word caps, format, tone and readability, person by person, with concrete suggestions for each writer's instructions.
-`unblind` names the writers, adds a cost table from `gemini/usage/<date>.json` (`--price-in` and `--price-out` turn tokens into dollars; `--claude-usage` adds the Claude run's numbers if you have them) and writes `reviews/<date>.md`.
 After unblinding, suggestions for the Gemini writer go to its prompts and suggestions for the Claude routine to `paper/INSTRUCTIONS.md`, as proposals for the owner.
+
+#### Comparing writers: two reviewers and points
+
+One gut score per writer is too noisy to compare runs, so every review ends with a `## Scores` section: a fenced JSON block listing, for each writer, every problem found under six metrics, plus a readability grade from 1 to 5 and the gut score out of 10.
+`score` counts the lists and applies fixed weights (the `WEIGHTS` table in `tools/compare/score.py`):
+
+| Metric | Points |
+| --- | --- |
+| Start | 100 |
+| `missed_news` | -6 each |
+| `untraceable_facts` | -8 each |
+| `wrong_numbers` | -10 each |
+| `cap_overruns` | -2 each |
+| `format_errors` | -3 each |
+| `tone_issues` | -2 each |
+| `readability` | +4 per grade (1 to 5) |
+
+Points have no floor, so a very poor run can go below zero.
+Writers are ranked by their mean points over the reviewers; the mean gut score only breaks a tie.
+`score` also prints every metric per reviewer with the spread between them, so you see where the two reviewers disagree.
+
+There are two independent reviewers.
+The Claude review is an agent or routine step that writes `review-claude.md`.
+`review --reviewer gemini` sends only REVIEWER.md (as the system instruction) and the packet to the Gemini API and writes `review-gemini.md` in the same shape.
+It is one request, and a second only when the answer is not usable JSON or its scores do not parse.
+The answer is streamed (`streamGenerateContent`), so a long review is not cut off by one overall read timeout.
+A 429 or 503 (the server did no work) waits and tries again, at most twice; a timeout or a dropped connection is never resent, since that request may already have been billed.
+`--model` picks the model (default `gemini-3.5-flash`; `gemini-3.8-flash` is stronger on the free tier but is often overloaded); the key is `GEMINI_API_KEY` from pass-env, and the privacy note above applies to the packet too.
+`score` and `unblind` read every `review-*.md` in the packet folder (or the files given with `--review`, repeatable); an older `review.md` counts as the Claude reviewer's.
+
+`unblind` names the writers, adds a cost table from `gemini/usage/<date>.json` (`--price-in` and `--price-out` turn tokens into dollars; `--claude-usage` adds the Claude run's numbers if you have them), the points table, and every review one after the other, in one file: `reviews/<date>-<label>.md`.
+The label defaults to the writers compared (`claude-vs-gemini`, `claude-vs-gemini-single`); `--label` sets it, for example `--label v2-split` for a new prompt version.
+Unblinding the same packet again replaces its own file, while a file there from a different packet is never overwritten: the next free `-2`, `-3` name is used.
 
 ### Later: choosing the writer
 

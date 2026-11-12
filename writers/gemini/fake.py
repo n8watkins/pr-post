@@ -8,27 +8,34 @@ import json
 import re
 import time
 
-ITEM = re.compile(r"^- \[(i\d+)\] (\S+) (.*?) <(https?://\S+)>$", re.M)
+ITEM = re.compile(r"^- \[(i\d+)\] (\S+) (.*?)(?: <(https?://\S+)>| \| link: \[[^\]]*\]\((https?://\S+?)\))$", re.M)
 PERSON = re.compile(r"^### (.+) \(id: ([a-z0-9-]+)\)$", re.M)
 
 
+TOP = re.compile(r"^#### Top news.*?\n\n(.*?)\n\n", re.M | re.S)
+
+
 def _items(text):
-    return [{"id": m.group(1), "title": m.group(3), "url": m.group(4)} for m in ITEM.finditer(text)]
+    return [{"id": m.group(1), "title": m.group(3), "url": m.group(4) or m.group(5)} for m in ITEM.finditer(text)]
 
 
 def _person_answer(name, block, schema_props, required, weekly):
-    items = _items(block)
+    top = TOP.search(block)
+    items = _items(top.group(1)) if top else []
+    items = items or _items(block)
     first = items[0] if items else None
-    link = f"[{first['title']}]({first['url']})" if first else "their repos"
+    second = items[1] if len(items) > 1 else first
+    link = lambda i: f"[{' '.join(i['title'].split()[:3])}]({i['url']})" if i else "their repos"
+    you = "Voice: Second person" in block or "This person is the reader" in block
+    who = "You" if you else name
     if weekly:
-        body = f"## TL;DR\n- {name} shipped {link}.\n\n## Work\n- Kept busy, see {link}.\n"
+        body = f"## TL;DR\n- {who} shipped {link(first)}.\n\n## Work\n- {who} kept the project moving, see {link(first)}.\n"
     else:
-        body = f"- {name} shipped {link}.\n"
+        body = f"- {who} shipped a change to the project: {link(first)}.\n- {who} also kept working on it: {link(second)}.\n"
     answer = {
         "report_md": body,
         "story": {"beat": "Tools desk", "headline": f"{name} keeps shipping", "summary": f"{name} had a steady stretch."},
         "profile_lines": [],
-        "lead_score": min(len(items), 10),
         "quote_candidate_ids": [i["id"] for i in items[:2]],
     }
     if "profile_md" in required or ("profile_md" in schema_props and "They have no profile yet" in block):
@@ -54,7 +61,7 @@ def respond(system, prompt, schema):
             name, pid, block = blocks[i], blocks[i + 1], blocks[i + 2]
             a = _person_answer(name, block, props["people"]["items"]["properties"], [], weekly)
             people.append({"id": pid, **a})
-        return {"people": people, "lead_id": people[0]["id"] if people else "", **_front()}
+        return {"people": people, **_front()}
     if "report_md" in props:
         m = PERSON.search(prompt)
         return _person_answer(m.group(1) if m else "They", prompt, props, schema.get("required", []), weekly)

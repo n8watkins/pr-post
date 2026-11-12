@@ -1,4 +1,4 @@
-"""Build a blind A/B packet comparing two writers on one snapshot, and unblind the review into reviews/<date>.md.
+"""Build a blind A/B packet comparing two writers on one snapshot, and unblind the reviews into reviews/<date>-<label>.md.
 
 A writer is a root inside the paper: "" for the Claude routine (reports/,
 editions/, profiles/) and "gemini" or "gemini/single" for the Gemini writer.
@@ -149,25 +149,97 @@ def cost_table(rows):
     return "\n".join(out)
 
 
-def unblind(paper, key_path, review_text, price_in=None, price_out=None, claude_usage=None):
-    """The review with Writer A and Writer B named, a header with the mapping and a cost table. Returns (path, text)."""
+def root_slug(root):
+    return root.replace("/", "-") if root else "claude"
+
+
+def default_label(key):
+    """A file name part naming the two writers compared, such as "claude-vs-gemini-single"."""
+    return "-vs-".join(sorted(root_slug(key[lb]["root"]) for lb in ("A", "B")))
+
+
+def packet_marker(key):
+    return f"Packet built {key.get('created_at', 'at an unknown time')}."
+
+
+def review_path(paper, key, label=None):
+    """reviews/<date>-<label>.md. A file there from another packet is kept: the next free -2, -3 is used instead."""
+    label = re.sub(r"[^a-z0-9.]+", "-", (label or default_label(key)).lower()).strip("-.") or "review"
+    marker = packet_marker(key)
+    base = Path(paper) / "reviews"
+    n = 1
+    while True:
+        path = base / (f"{key['date']}-{label}.md" if n == 1 else f"{key['date']}-{label}-{n}.md")
+        existing = read(path)
+        if existing is None or marker in existing:
+            return path
+        n += 1
+
+
+def demote(md):
+    """Every Markdown heading one level down, outside fenced blocks."""
+    out, fence = [], None
+    for line in md.splitlines():
+        m = re.match(r"^(`{3,}|~{3,})", line)
+        if m:
+            if fence is None:
+                fence = m.group(1)
+            elif line.strip() == fence:
+                fence = None
+        out.append("#" + line if fence is None and re.match(r"^#{1,5} ", line) else line)
+    return "\n".join(out)
+
+
+def unblind(paper, key_path, reviews, price_in=None, price_out=None, claude_usage=None, label=None):
+    """Name the writers in one or more blind reviews and save them as one file, with cost and points tables.
+
+    `reviews` is {reviewer: review text}; a single text counts as the Claude reviewer's.
+    Writes reviews/<date>-<label>.md and returns (path, text).
+    """
+    from . import score
+
     key = json.loads(Path(key_path).read_text())
-    for label in ("A", "B"):
-        if f"Writer {label}" not in review_text:
-            raise ValueError(f"The review never mentions Writer {label}; is it the review of this packet?")
-    names = {label: key[label]["writer"] for label in ("A", "B")}
-    body = re.sub(r"\bWriter ([AB])\b", lambda m: f"{names[m.group(1)]} (Writer {m.group(1)})", review_text.strip())
-    body = re.sub(r"^# .*\n+", "", body, count=1)
+    if isinstance(reviews, str):
+        reviews = {"claude": reviews}
+    if not reviews:
+        raise ValueError("No review to unblind.")
+    for name, review_text in reviews.items():
+        for lb in ("A", "B"):
+            if f"Writer {lb}" not in review_text:
+                raise ValueError(f"The {name} review never mentions Writer {lb}; is it the review of this packet?")
+    names = {lb: key[lb]["writer"] for lb in ("A", "B")}
+
+    def named(text):
+        return re.sub(r"\bWriter ([AB])\b", lambda m: f"{names[m.group(1)]} (Writer {m.group(1)})", text)
+
+    parsed, unscored = {}, []
+    for name, review_text in reviews.items():
+        try:
+            parsed[name] = score.parse_review(review_text)
+        except ValueError:
+            unscored.append(name)
     rows = []
-    for label in ("A", "B"):
-        root = key[label]["root"]
+    for lb in ("A", "B"):
+        root = key[lb]["root"]
         override = claude_usage if not root else None
-        rows.append((names[label], usage_row(paper, root, key["date"], price_in if root else None, price_out if root else None, override)))
+        rows.append((names[lb], usage_row(paper, root, key["date"], price_in if root else None, price_out if root else None, override)))
+    count = f"{len(reviews)} reviewer{'s' if len(reviews) > 1 else ''} ({', '.join(reviews)})"
     header = [f"# Writer comparison: {key['kind']} of {key['date']}", "",
-              f"Reviewed blind, then unblinded: Writer A was {names['A']} and Writer B was {names['B']}.", "",
-              "## Cost", "", cost_table(rows), ""]
-    text = "\n".join(header) + "\n" + body + "\n"
-    path = Path(paper) / "reviews" / f"{key['date']}.md"
+              f"Reviewed blind by {count}, then unblinded: Writer A was {names['A']} and Writer B was {names['B']}.",
+              packet_marker(key), "", "## Cost", "", cost_table(rows), ""]
+    if parsed:
+        header += ["## Points", "", f"Each writer starts at {score.BASE}; the weights are in tools/compare/score.py.", "",
+                   score.render(parsed, names), ""]
+    if unscored:
+        header += [f"No scores block in the review by {', '.join(unscored)}, so it is left out of the points.", ""]
+    parts = []
+    for name, review_text in reviews.items():
+        body = re.sub(r"^# .*\n+", "", review_text.strip(), count=1)
+        if len(reviews) > 1:
+            body = f"## Review by the {name} reviewer\n\n" + demote(body)
+        parts.append(named(body))
+    text = "\n".join(header) + "\n" + "\n\n".join(parts) + "\n"
+    path = review_path(paper, key, label)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
     return path, text

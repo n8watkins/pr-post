@@ -44,6 +44,10 @@ test("lanes: who may read and write which paper paths", () => {
   assert.ok(paperAllowed("owner", "reports/ada/2026-11-01-weekly.md", false));
   assert.ok(!paperAllowed("owner", "reports/ada/x.md", true));
   assert.ok(paperAllowed("writer", "briefs/ada.md", false));
+  assert.ok(paperAllowed("writer", "logs/writer-usage/2026-11-14-claude.json", true));
+  assert.ok(!paperAllowed("writer", "logs/writer-usage/nested/x.json", true));
+  assert.ok(!paperAllowed("writer", "logs/run.log", true));
+  assert.ok(!paperAllowed("writer", "logs/writer-usage/2026-11-14-claude.json", false));
   assert.ok(paperAllowed("writer", "reports/ada/x.md", true));
   assert.ok(!paperAllowed("writer", "briefs/ada.md", true));
   assert.ok(!paperAllowed("writer", "follow/latest.json", false));

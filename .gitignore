@@ -7,3 +7,14 @@ node_modules/
 # Collected data and stats are rebuilt on every run and never committed for the demo.
 demo/data/
 demo/stats/
+
+# The private paper: store.py pull writes it into paper/ (paper/INSTRUCTIONS.md),
+# and none of it may ever be committed to this public repository. Only the
+# tracked files below paper/ (instructions, setup, config, migrations, bin) belong in git.
+paper/*
+!paper/INSTRUCTIONS.md
+!paper/README.md
+!paper/SETUP.md
+!paper/wrangler.jsonc
+!paper/bin/
+!paper/migrations/

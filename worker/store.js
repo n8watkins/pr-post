@@ -42,6 +42,7 @@ export const PAPER_DIRS = ["data", "stats", "briefs", "reports", "editions", "su
 const IN_D1 = new Set(["follow/state.json", "follow/actions.jsonl"]);
 export const WRITER_READ = ["briefs", "data", "reports", "editions", "summaries"];
 export const WRITER_WRITE = ["reports", "editions"];
+export const WRITER_USAGE_PREFIX = "logs/writer-usage/";
 const MAX_FILE = 20 * 1024 * 1024;
 const MAX_JSON = 4 * 1024 * 1024;
 const MAX_PROFILE = 64 * 1024;
@@ -64,7 +65,11 @@ export function paperAllowed(role, path, write) {
   if (!PAPER_DIRS.includes(dir) || path === dir) return false;
   if (role === "jobs") return true;
   if (role === "owner") return !write;
-  if (role === "writer") return (write ? WRITER_WRITE : WRITER_READ).includes(dir);
+  if (role === "writer") {
+    // The routine's own usage record (scripts/writer_usage.py) is its only write outside its lanes.
+    if (write && path.startsWith(WRITER_USAGE_PREFIX) && !path.slice(WRITER_USAGE_PREFIX.length).includes("/")) return true;
+    return (write ? WRITER_WRITE : WRITER_READ).includes(dir);
+  }
   return false;
 }
 
