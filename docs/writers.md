@@ -151,7 +151,9 @@ Without `--verbose` it prints counts only, like `scripts/store.py`, because Acti
 | `gemini/usage/<date>.json` | Requests, retries, input, output and thinking tokens (from `usageMetadata`), latency, checks still failing |
 | `gemini/single/...` | The same for variant B (`--single`), so both variants can run on one snapshot |
 
-The prompts are files in `writers/gemini/prompts/v2/` (the default; `v1/` is kept as the baseline), built from the writing rules and formats in `paper/INSTRUCTIONS.md` (not its tool or file steps).
+The prompts are files in `writers/gemini/prompts/v3/` (the default; `v1/` and `v2/` are kept for comparison), built from the writing rules and formats in `paper/INSTRUCTIONS.md` (not its tool or file steps).
+v3 lists each person's one or two must-cover items apart from the rest of their top news, asks for full sentences that explain a change rather than reword its title, and keeps each new repo and each lead project in its own sentence.
+Code checks back those rules up, so an answer that breaks one is retried once with the problem named: a bullet written as "project: change", a bullet of bare counts, a bullet that only rewords PR or commit titles, a new repo folded into another project's bullet, a must-cover item left out, a purpose or quality claim ("designed to", "cleaner") the brief never makes, and a lead that leaves a winning project unnamed or joins projects with "alongside".
 Change them by adding a new version folder and passing `--prompt-version`, so every output records which prompts wrote it.
 
 The paper's storage accepts `gemini/` and `reviews/` from the jobs token, and the owner can read them at `/files/gemini/...` after sign-in.

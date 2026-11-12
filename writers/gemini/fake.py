@@ -29,7 +29,7 @@ def _person_answer(name, block, schema_props, required, weekly):
     you = "Voice: Second person" in block or "This person is the reader" in block
     who = "You" if you else name
     if weekly:
-        body = f"## TL;DR\n- {who} shipped {link(first)}.\n\n## Work\n- {who} kept the project moving, see {link(first)}.\n"
+        body = f"## TL;DR\n- {who} shipped {link(first)}.\n\n## Work\n- {who} kept the project moving, see {link(second)}.\n"
     else:
         body = f"- {who} shipped a change to the project: {link(first)}.\n- {who} also kept working on it: {link(second)}.\n"
     answer = {
