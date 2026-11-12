@@ -33,6 +33,14 @@ That page is what the email digest links to; the digest itself carries only the 
 `data/<id>.json` can run to hundreds of kilobytes for a busy person, and an AI writer pays for every byte it reads on every later step, so reading briefs instead is the biggest single saving.
 Commit `briefs/` with `data/` and `stats/`.
 
+Each brief is cut to that person's report window and opens with it, as in `Window: 2026-11-07 to 2026-11-11 (since the 2026-11-07 weekly), for a midweek update.`
+The window ends on the collection date; a weekly report (Saturday) starts at the newest weekly report or 7 days back, and a midweek update at the newest report of either kind or 4 days back, both ends included.
+Every writer therefore reads the same items, and none repeats what an earlier report covered; the Gemini writer applies the same rule, and `tests/test_brief.py` checks that the two agree.
+`python3 scripts/brief.py --kind weekly` cuts the briefs for the other kind of run.
+
+The Claude routine ends each run with `scripts/writer_usage.py`, which stores `logs/writer-usage/<date>-claude.json`: start and finish time, turns, the files it read and their bytes, what it wrote, and tokens when the model was told them (otherwise `null`).
+Pass that file to `python3 -m tools.compare unblind --claude-usage` for the cost table.
+
 [INSTRUCTIONS.md](../INSTRUCTIONS.md) describes each file's format in detail.
 The summaries file looks like this:
 
@@ -117,13 +125,19 @@ Without `--verbose` it prints counts only, like `scripts/store.py`, because Acti
 0. **Prepare, in code.** For each person, the window follows [paper/INSTRUCTIONS.md](../paper/INSTRUCTIONS.md) step 1 (weekly: since the newest weekly report, or 7 days; midweek: since the newest report of either kind, or 4 days), counting only reports dated before the run.
    The brief is trimmed to that window, and each kept item gets an id such as `i4`.
    A missing brief, or one collected more than 24 hours before the run, is skipped, as the instructions say.
+   Trimming a brief that was already trimmed to the window changes nothing, so briefs built per window upstream work the same.
    A person with nothing in the window is quiet: they get a one-line report from a template and no request.
-   Active people get their profile attached.
-1. **One request per active person**, answering `{report_md, story {beat, headline, summary}, profile_lines[], lead_score, quote_candidate_ids[]}` (plus `profile_md` when they have no profile yet).
+   Active people get their profile attached, plus one line on what each project of their profile's "Active projects" is, for the projects the window touches, so a bullet can say what a project is.
+   Code also ranks each person's items by news value (new repos, releases, videos, headline speedups, release prep) and picks the front-page lead: the biggest ranked news (the top item counted twice, plus the next two) and a capped bonus for the brief's Numbers (merged PRs, releases) and launches.
+   The reader leads only when their value beats everyone else's by a clear margin, since they already know what they shipped.
+1. **One request per active person**, answering `{report_md, story {beat, headline, summary}, profile_lines[], quote_candidate_ids[]}` (plus `profile_md` when they have no profile yet).
+   Each item in the brief ends with the exact Markdown link to use, short label included (`[PR 15162](...)`, `[CodexBar v0.84.0](...)`), and the request ends with a short checklist (links, word caps, voice, the JSON shape), so first answers pass more often.
 2. **One edition request** that sees only stage 1's answers, not the briefs: `tldr`, `lead` (headline, deck, body), `weather` and `corrections` (checked against the previous Gemini edition's "probably" guesses).
-3. **Assemble, in code.** The lead is the highest `lead_score`; births and obituaries come from the briefs; the quote of the week is copied by code from `data/<id>.json` by item id, so it is never model-written; quiet people get their template line and a quiet story.
+   It is told who leads and which items won it; the model only writes the lead.
+3. **Assemble, in code.** The lead is the one code picked (the next best when their report failed); births and obituaries come from the briefs; the quote of the week is copied by code from `data/<id>.json` by item id, so it is never model-written; quiet people get their template line and a quiet story.
    A midweek edition keeps the lead and three stories.
 4. **Check, in code.** Word caps (weekly report 250, update 120, front page 400, TL;DR bullets 15, story summaries 30), the JSON shape, every number printed must appear in the request's input, and every link must be an address from the input.
+   Before checking, code fixes what needs no model: a pasted title as a link label becomes the label its address calls for, a midweek update keeps its first four bullets, and Markdown links on the front page become plain text.
    On a failure the request is sent once more with the problems listed; whatever still fails is kept and recorded, so the comparison shows it.
    Em dashes are replaced with hyphens.
 5. **Save** under `gemini/` in the paper, and push that folder with `scripts/store.py push` when the folder was pulled with it (`--no-push` keeps it local).
@@ -137,7 +151,7 @@ Without `--verbose` it prints counts only, like `scripts/store.py`, because Acti
 | `gemini/usage/<date>.json` | Requests, retries, input, output and thinking tokens (from `usageMetadata`), latency, checks still failing |
 | `gemini/single/...` | The same for variant B (`--single`), so both variants can run on one snapshot |
 
-The prompts are files in `writers/gemini/prompts/v1/`, built from the writing rules and formats in `paper/INSTRUCTIONS.md` (not its tool or file steps).
+The prompts are files in `writers/gemini/prompts/v2/` (the default; `v1/` is kept as the baseline), built from the writing rules and formats in `paper/INSTRUCTIONS.md` (not its tool or file steps).
 Change them by adding a new version folder and passing `--prompt-version`, so every output records which prompts wrote it.
 
 The paper's storage accepts `gemini/` and `reviews/` from the jobs token, and the owner can read them at `/files/gemini/...` after sign-in.

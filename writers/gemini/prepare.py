@@ -6,6 +6,7 @@ this module returns, so the dry run and the real run send the same text.
 
 import datetime as dt
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -28,6 +29,7 @@ NEWEST_RE = re.compile(r"Newest report: (\d{4}-\d{2}-\d{2})-(weekly|update)(?:; 
 DATED = {"Merged PRs": "pr", "Open PRs": "open_pr", "Commits to repos with no merged PR": "commit",
          "Releases": "release", "New repos": "birth", "Videos": "video"}
 QUOTABLE = {"pr", "open_pr", "commit", "video"}
+ID_TAG = re.compile(r"^- \[i\d+\] ")
 
 
 def kind_for(day):
@@ -134,10 +136,13 @@ def trim(brief_text, start, end):
             if line.startswith("  ") and line.strip():
                 if keep_child:
                     kept.append(line)
+                    if items and items[-1]["id"] == f"i{n}" and not items[-1].get("desc"):
+                        items[-1]["desc"] = line.strip()
                 continue
             keep_child = False
             if not line.strip():
                 continue
+            line = ID_TAG.sub("- ", line, count=1)  # a brief trimmed before keeps its items; they get fresh ids
             m = ITEM_RE.match(line)
             day = DATE_RE.match(line[2:]) if line.startswith("- ") else None
             if day:
@@ -165,7 +170,10 @@ def trim(brief_text, start, end):
             else:
                 kept.append(line)
         if any(l.startswith("- [") for l in kept):
-            out += ["", re.sub(r"\s*\(\d+\)\s*$", "", heading).replace(", newest first", " in the window, newest first")] + kept
+            heading = re.sub(r"\s*\(\d+\)\s*$", "", heading)
+            if " in the window" not in heading:
+                heading = heading.replace(", newest first", " in the window, newest first")
+            out += ["", heading] + kept
     return "\n".join(out).rstrip() + "\n", items
 
 
@@ -182,6 +190,92 @@ def archived(brief_text):
     return out
 
 
+def busiest(brief_text):
+    """Repos in the brief's "Busiest public repos" section, busiest first."""
+    out, inside = [], False
+    for line in brief_text.splitlines():
+        if line.startswith("## "):
+            inside = line[3:].startswith("Busiest")
+            continue
+        m = re.match(r"^- (\S+): ", line) if inside else None
+        if m:
+            out.append(m.group(1))
+    return out
+
+
+# News value, used to order what each report should lead with. A rough, code-only
+# reading of titles: it never decides what is written, only what comes first.
+STRONG = re.compile(r"(\b\d+(\.\d+)?x (faster|smaller|less)\b|\bhalve[sd]?\b|(?<!\bat )(?<!\bon )\blaunch(es|ed|ing)?\b(?! contract)|"
+                    r"\bfirst release\b|\binitial (public )?release\b|\bprepare for v?\d+\.0|\brelease prep\b.*\d+\.\d+|"
+                    r"(?<![\d.])v?[1-9]\d*\.0(\.0)?\b(?![.-])|\bintroduc\w+)", re.I)
+MEDIUM = re.compile(r"\b(faster|speed ?up|speeds? up|quicker|release[sd]?|publish\w*|new|support\w*|add\w*|ship\w*|redesign\w*)\b", re.I)
+FEATURE = re.compile(r"^feat\b", re.I)
+SMALL = re.compile(r"^(chore|ci|test|tests|docs?|style|build|deps|lint|bump|typo|format|refactor)\b|\b(bump|chore|typo|lint|"
+                   r"formatting|dependabot|update dependenc\w*|readme)\b|\b(update|bump|upgrade) [\w@/.-]+( cask)? to v?\d", re.I)
+FILLER_REPO = re.compile(r"(^|/)\.github$|\.github\.io$|release-key|signing key|dotfiles", re.I)
+KIND_SCORE = {"birth": 9, "release": 8, "video": 8, "pr": 4, "commit": 2, "open_pr": 1}
+KIND_LABEL = {"birth": "new repo", "release": "release", "video": "video", "pr": "merged PR", "commit": "commit", "open_pr": "open PR"}
+
+
+def major_release(title):
+    m = re.search(r"v?(\d+)\.(\d+)(?:\.(\d+))?", title or "")
+    return bool(m) and m.group(1) != "0" and m.group(2) == "0" and m.group(3) in (None, "0")
+
+
+def filler_birth(item):
+    owner, _, name = item["repo"].partition("/")
+    return bool(FILLER_REPO.search(item["repo"]) or FILLER_REPO.search(item["title"])) or (name and name.lower() == owner.lower())
+
+
+def news_score(item, busy):
+    score = KIND_SCORE.get(item["kind"], 0)
+    if item["kind"] in ("pr", "commit", "open_pr"):
+        title = item["title"]
+        if SMALL.search(title):
+            score -= 3
+        elif STRONG.search(title):
+            score += 4
+        elif MEDIUM.search(title) or FEATURE.search(title) or STRONG.search(item.get("desc", "")[:200]):
+            score += 2
+    if item["kind"] == "release" and major_release(item["title"]):
+        score += 2
+    if item["kind"] == "birth" and filler_birth(item):
+        score = 2
+    if item["repo"] and busy and item["repo"] == busy[0]:
+        score += 1
+    return score
+
+
+def highlights(items, gone, busy, limit=8):
+    """The window's most newsworthy items, best first: [{"id", "kind", "label", "repo", "title", "url", "score"}].
+
+    Several releases of one repo count once (its newest), and each repo gets at
+    most two entries (three for the busiest), so one busy repo cannot crowd out a launch elsewhere.
+    Archived repos come last but are always listed.
+    """
+    scored, seen_release, per_repo = [], set(), {}
+    for item in items:
+        if item["kind"] == "release":
+            if item["repo"] in seen_release:
+                continue
+            seen_release.add(item["repo"])
+        scored.append((news_score(item, busy), item))
+    scored.sort(key=lambda t: (-t[0], t[1]["date"] and -int(t[1]["date"].replace("-", ""))))
+    out = []
+    for score, item in scored:
+        if score <= 0 or per_repo.get(item["repo"], 0) >= (3 if busy and item["repo"] == busy[0] else 2):
+            continue
+        per_repo[item["repo"]] = per_repo.get(item["repo"], 0) + 1
+        out.append({"id": item["id"], "kind": item["kind"], "label": KIND_LABEL[item["kind"]], "repo": item["repo"],
+                    "title": item["title"], "url": item["url"], "score": score})
+        if len(out) >= limit:
+            break
+    for g in gone:
+        out.append({"id": "", "kind": "archived", "label": "archived repo", "repo": g["repo"], "title": "archived or gone",
+                    "url": g["url"], "score": 7})
+    return out
+
+
 def numbers_line(brief_text):
     """The brief's "Numbers (copied from stats/)" lines, the only source for figures."""
     lines, inside = [], False
@@ -192,6 +286,149 @@ def numbers_line(brief_text):
         if inside and line.startswith("- "):
             lines.append(line[2:])
     return lines
+
+
+COUNT_RE = {"merged": re.compile(r"(\d+)\+? merged PRs?\b"), "releases": re.compile(r"(\d+)\+? releases?\b"),
+            "videos": re.compile(r"(\d+)\+? videos?\b")}
+
+
+def number_counts(numbers):
+    """{"merged", "releases", "videos"} read from the brief's Numbers lines (0 when a figure is missing)."""
+    text = " ".join(numbers or [])
+    out = {}
+    for key, rx in COUNT_RE.items():
+        m = rx.search(text)
+        out[key] = int(m.group(1)) if m else 0
+    return out
+
+
+PROJECT_SECTION = re.compile(r"^(active projects|projects)\b", re.I)
+REPO_LINK = re.compile(r"\[([\w.-]+/[\w.-]+)\]\(https?://github\.com/[^)\s]+\)|https?://github\.com/([\w.-]+/[\w.-]+)")
+WHAT_WORDS = 20
+
+
+def first_sentence(text, limit=WHAT_WORDS):
+    """The first sentence of `text`, cut to `limit` words (with "..." when cut)."""
+    text = re.sub(r"\s+", " ", text or "").strip()
+    for m in re.finditer(r"[.!?](?=\s|$)", text):
+        if text[:m.start()].count('"') % 2 == 0 and text[:m.start()].count("(") <= text[:m.start()].count(")"):
+            text = text[:m.end()]
+            break
+    words = text.split()
+    return " ".join(words[:limit]).rstrip(".,;:") + "..." if len(words) > limit else text
+
+
+# A profile line that only classifies a project ("Product, open source (about 11.5k stars).", "Internal tooling for
+# the agency") or names its audience says little about what it is; such lines are used only when nothing else does.
+CLASSIFY = re.compile(r"^(product|open[- ]source|internal tool\w*|personal tool\w*|someone else'?s|what it is)\b[^:]*:\s*", re.I)
+CLASSIFY_ONLY = re.compile(r"^(product|open[- ]source|internal tool|personal tool|someone else)", re.I)
+SKIP_LINE = re.compile(r"^(audience|status|history|links?)\s*:|^\(", re.I)
+DESCRIBE_WORDS = 6
+
+
+def describe(lines):
+    """The line that best says what a project is: the first one of some length that is not only a classification."""
+    cleaned = []
+    for line in lines:
+        line = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", line).strip(" .,;")
+        if not line or SKIP_LINE.match(line):
+            continue
+        cleaned.append(CLASSIFY.sub("", line).strip(" .,;") or line)
+    bare = lambda l: re.sub(r"\([^)]*\)", "", l)
+    good = [l for l in cleaned if len(bare(l).split()) >= DESCRIBE_WORDS and not (CLASSIFY_ONLY.match(l) and len(bare(l).split()) < 8)]
+    pick = good[0] if good else (cleaned[0] if cleaned else "")
+    what = first_sentence(pick) if pick else ""
+    return what[:-1] if what.endswith(".") and not what.endswith("...") else what
+
+
+def project_lines(profile):
+    """One line per project in the profile's "Active projects" (or "Projects") section: [{"name", "repo", "what"}].
+
+    Reads both shapes profiles use: a "### Name" subsection whose first lines are a repo link and a
+    description (before any "History:"), or a "- name: description" bullet. "what" is the first
+    sentence that says what the project is, so a bullet can say it in a few words.
+    """
+    out, inside, current = [], False, None
+    for line in (profile or "").splitlines():
+        stripped = line.strip()
+        if line.startswith("## "):
+            inside, current = bool(PROJECT_SECTION.match(line[3:].strip())), None
+            continue
+        if not inside:
+            continue
+        if line.startswith("### "):
+            current = {"name": line[4:].strip(), "repo": "", "lines": [], "closed": False}
+            out.append(current)
+            continue
+        if current is None:
+            m = re.match(r"^- (?:\[([^\]]+)\]\([^)]*\)|([^:]+)):\s*(.+)$", line)
+            if m:
+                name = (m.group(1) or m.group(2)).strip()
+                link = REPO_LINK.search(line)
+                repo = (link.group(1) or link.group(2)) if link else (name if "/" in name else "")
+                out.append({"name": name.split("/")[-1], "repo": repo, "lines": [m.group(3)], "closed": True})
+            continue
+        if current["closed"] or not stripped:
+            continue
+        if re.match(r"^(history|links?)\s*:", stripped, re.I) or stripped.startswith("- "):
+            current["closed"] = True
+            continue
+        link = REPO_LINK.search(stripped)
+        if link and not current["repo"]:
+            current["repo"] = link.group(1) or link.group(2)
+        current["lines"].append(REPO_LINK.sub("", stripped))
+    found = []
+    for p in out:
+        what = describe(p["lines"])
+        if what:
+            found.append({"name": p["name"], "repo": p["repo"], "what": what})
+    return found
+
+
+def projects_in_window(projects, items, gone=()):
+    """The profile projects this window's items touch, in profile order."""
+    repos = {i["repo"].lower() for i in items if i.get("repo")} | {g["repo"].lower() for g in gone}
+    names = {r.split("/")[-1] for r in repos}
+    return [p for p in projects if (p["repo"] and p["repo"].lower() in repos)
+            or re.split(r"[\s(]", p["name"].lower())[0] in names]
+
+
+# The front-page lead, picked in code: the biggest news (the ranked highlights, the top one counted twice),
+# plus a capped bonus for volume (merged PRs, releases and launches). The reader knows what they shipped,
+# so they lead only when their value beats everyone else's by READER_MARGIN.
+LEAD_ITEMS = 3
+VOLUME_CAP = 8
+READER_MARGIN = 3
+LAUNCH = re.compile(r"(?<!\bat )(?<!\bon )\blaunch(es|ed|ing)?\b(?! contract)", re.I)
+
+
+def launches(person):
+    """New repos worth a story, and items whose title says they launched, in the window."""
+    return sum(1 for h in person.get("highlights") or [] if (h["kind"] == "birth" and h["score"] >= KIND_SCORE["birth"])
+               or (h["kind"] in ("pr", "commit", "release") and LAUNCH.search(h["title"])))
+
+
+def lead_value(person):
+    """How much this person's news deserves the front page lead, from code alone."""
+    scores = sorted((h["score"] for h in person.get("highlights") or [] if h["kind"] != "archived"), reverse=True)[:LEAD_ITEMS]
+    news = (scores[0] if scores else 0) + sum(scores)
+    n = number_counts(person.get("numbers"))
+    volume = min(VOLUME_CAP, math.log2(1 + n["merged"] + 2 * n["releases"] + 3 * launches(person)))
+    return round(news + volume, 2)
+
+
+def pick_lead(people):
+    """The id of the person whose news leads, among `people` (active people with highlights), or None."""
+    if not people:
+        return None
+    key = lambda p: (lead_value(p), max((h["score"] for h in p.get("highlights") or []), default=0), bool(p.get("starred")),
+                     len(p.get("items") or []))
+    ranked = sorted(people, key=key, reverse=True)
+    others = [p for p in ranked if not p.get("self")]
+    reader = next((p for p in ranked if p.get("self")), None)
+    if reader is None or not others:
+        return ranked[0]["id"]
+    return reader["id"] if lead_value(reader) >= lead_value(others[0]) + READER_MARGIN else others[0]["id"]
 
 
 def load_exact_titles(paper, pid):
@@ -244,10 +481,13 @@ def prepare(paper, kind=None, today=None, now=None):
         gone = archived(text)
         prof = paper / "profiles" / f"{pid}.md"
         person = {**entry, "start": start.isoformat(), "end": end.isoformat(), "brief": trimmed, "items": items,
-                  "archived": gone, "numbers": numbers_line(text), "titles": load_exact_titles(paper, pid)}
+                  "archived": gone, "numbers": numbers_line(text), "titles": load_exact_titles(paper, pid),
+                  "highlights": highlights(items, gone, busiest(text))}
         if not items and not gone:
             people.append({**person, "status": "quiet"})
             continue
         person["profile"] = prof.read_text() if prof.is_file() else ""
+        person["projects"] = projects_in_window(project_lines(person["profile"]), items, gone)
         people.append({**person, "status": "active"})
-    return {"date": today.isoformat(), "kind": kind, "reader": cfg["writer"]["reader"], "people": people}
+    lead = pick_lead([p for p in people if p["status"] == "active"])
+    return {"date": today.isoformat(), "kind": kind, "reader": cfg["writer"]["reader"], "people": people, "lead": lead}
