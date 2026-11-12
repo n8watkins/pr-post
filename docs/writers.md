@@ -170,15 +170,49 @@ Use a paid tier (a Cloud Billing account on the API key's project), where inputs
 
 ```sh
 python3 -m tools.compare packet --paper work/ --date 2026-11-14                 # Claude ("") against gemini; --b gemini/single for variant B
-# a Claude agent reviews work/.compare/2026-11-14/packet.md following tools/compare/REVIEWER.md, writing review.md beside it
-python3 -m tools.compare unblind --paper work/ --date 2026-11-14 --push        # -> reviews/2026-11-14.md in the paper
+# reviewer 1: a Claude agent reviews work/.compare/2026-11-14/packet.md following tools/compare/REVIEWER.md, writing review-claude.md beside it
+pass-env run -- python3 -m tools.compare review --reviewer gemini --paper work/ --date 2026-11-14   # reviewer 2 -> review-gemini.md
+python3 -m tools.compare score --paper work/ --date 2026-11-14                  # points per writer, both reviewers, still blind
+python3 -m tools.compare unblind --paper work/ --date 2026-11-14 --push        # -> reviews/2026-11-14-claude-vs-gemini.md in the paper
 ```
 
 The packet holds the trimmed briefs, then each writer's reports and edition labelled Writer A and Writer B in a random order, with every field that names a model removed.
 The mapping goes to `.compare/<date>.key.json`, outside the folder the reviewer reads; `.compare/` is never pushed.
 [tools/compare/REVIEWER.md](../tools/compare/REVIEWER.md) is the reviewer's prompt: missed news, untraceable facts, numbers that do not match the brief, word caps, format, tone and readability, person by person, with concrete suggestions for each writer's instructions.
-`unblind` names the writers, adds a cost table from `gemini/usage/<date>.json` (`--price-in` and `--price-out` turn tokens into dollars; `--claude-usage` adds the Claude run's numbers if you have them) and writes `reviews/<date>.md`.
 After unblinding, suggestions for the Gemini writer go to its prompts and suggestions for the Claude routine to `paper/INSTRUCTIONS.md`, as proposals for the owner.
+
+#### Comparing writers: two reviewers and points
+
+One gut score per writer is too noisy to compare runs, so every review ends with a `## Scores` section: a fenced JSON block listing, for each writer, every problem found under six metrics, plus a readability grade from 1 to 5 and the gut score out of 10.
+`score` counts the lists and applies fixed weights (the `WEIGHTS` table in `tools/compare/score.py`):
+
+| Metric | Points |
+| --- | --- |
+| Start | 100 |
+| `missed_news` | -6 each |
+| `untraceable_facts` | -8 each |
+| `wrong_numbers` | -10 each |
+| `cap_overruns` | -2 each |
+| `format_errors` | -3 each |
+| `tone_issues` | -2 each |
+| `readability` | +4 per grade (1 to 5) |
+
+Points have no floor, so a very poor run can go below zero.
+Writers are ranked by their mean points over the reviewers; the mean gut score only breaks a tie.
+`score` also prints every metric per reviewer with the spread between them, so you see where the two reviewers disagree.
+
+There are two independent reviewers.
+The Claude review is an agent or routine step that writes `review-claude.md`.
+`review --reviewer gemini` sends only REVIEWER.md (as the system instruction) and the packet to the Gemini API and writes `review-gemini.md` in the same shape.
+It is one request, and a second only when the answer is not usable JSON or its scores do not parse.
+The answer is streamed (`streamGenerateContent`), so a long review is not cut off by one overall read timeout.
+A 429 or 503 (the server did no work) waits and tries again, at most twice; a timeout or a dropped connection is never resent, since that request may already have been billed.
+`--model` picks the model (default `gemini-3.5-flash`; `gemini-3.8-flash` is stronger on the free tier but is often overloaded); the key is `GEMINI_API_KEY` from pass-env, and the privacy note above applies to the packet too.
+`score` and `unblind` read every `review-*.md` in the packet folder (or the files given with `--review`, repeatable); an older `review.md` counts as the Claude reviewer's.
+
+`unblind` names the writers, adds a cost table from `gemini/usage/<date>.json` (`--price-in` and `--price-out` turn tokens into dollars; `--claude-usage` adds the Claude run's numbers if you have them), the points table, and every review one after the other, in one file: `reviews/<date>-<label>.md`.
+The label defaults to the writers compared (`claude-vs-gemini`, `claude-vs-gemini-single`); `--label` sets it, for example `--label v2-split` for a new prompt version.
+Unblinding the same packet again replaces its own file, while a file there from a different packet is never overwritten: the next free `-2`, `-3` name is used.
 
 ### Later: choosing the writer
 
