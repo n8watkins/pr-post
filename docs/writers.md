@@ -104,6 +104,21 @@ This is how the original private paper runs.
 Report commits start with `report:`.
 If you want a guard against a prompt-injected writer touching other files, fail CI when a `report:` commit changes anything outside `reports/`, `profiles/`, `editions/` and `summaries/`.
 
+### What the instructions ask of the writer
+
+[paper/INSTRUCTIONS.md](../paper/INSTRUCTIONS.md) briefs the routine the way you would brief a capable writer; it is not a pipeline.
+It is read on every run and paid for in tokens, so keep it short.
+Blind reviews of the November 2026 runs showed what matters most, and the instructions now say each of these plainly:
+
+- The brief is the only source: the writer never opens `data/` or `stats/`, and every link is copied from that person's brief.
+  Step 8's check prints any link that is not.
+- A quiet person (a brief that ends `Nothing dated inside the window`) gets one line, whatever the numbers or READMEs show.
+- `births` and `obituaries` list every new and archived repo in every brief, not a sample.
+- Each project is named with what it is the first time it appears, from the brief or the profile, and bullets stay within the cap.
+- The lead is the biggest news, and the reader is "you" everywhere, in the edition too.
+
+Before changing the instructions, run a test round: copy the paper, rebuild its briefs with `scripts/brief.py --paper <copy>`, and have a Sonnet agent follow the instructions with store.py, connectors and git turned off.
+
 ## (b) The Gemini writer
 
 `writers/gemini/` is a second, fully independent writer: plain Python (standard library only) that calls the Gemini API's `generateContent` with a JSON response schema.
