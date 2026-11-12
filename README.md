@@ -50,6 +50,22 @@ python3 scripts/feed.py --check dist/feed.json    # validate the feed
 python3 -m http.server -d dist 8737               # open http://localhost:8737
 ```
 
+## On your phone
+
+The paper installs as an app, with no app store: it gets a home screen icon, opens full screen, and the newest issue opens offline.
+
+- **iPhone and iPad (Safari):** open the paper, tap **Share**, then **Add to Home Screen**, then **Add**.
+  The paper shows a short hint at the bottom of the page the first time.
+- **Android (Chrome):** open the paper and tap **Install** on the card at the bottom of the page, or open the **⋮** menu and choose **Add to Home screen** (or **Install app**).
+- **Desktop Chrome or Edge:** the **Install** card, or the install icon at the right of the address bar.
+
+Dismissing the card is remembered on that device.
+Pick **System**, **Light** or **Dark** under **Theme** at the bottom of the sidebar (the **Menu** on a phone); the choice is kept in that browser.
+
+The service worker (`site/sw.js`, written to `sw.js` at the site's root by the build) keeps the stylesheet, scripts, icons, fonts, the front page, every person's page and the newest issue.
+Pages always come from the network first, so you never read an old issue while online.
+It never touches `/api/`, `/act/`, `/files/`, anything that is not a GET, or Cloudflare Access sign-in, and every publish that changes the site replaces its cache.
+
 ## Configuration
 
 Everything lives in one `watchlist.toml`, and every setting has a default.
@@ -58,6 +74,7 @@ The folder that holds it is the **paper**; collected data, stats and any written
 ```toml
 [site]
 title = "The Pull Request Post"     # masthead and page titles
+short_name = ""                     # name under the app icon; default "PR Post", or the title when you change it
 motto = "All the commits fit to print"
 mode = "public"                     # "public" (GitHub Pages) or "private" (Cloudflare Worker with sign-in)
 show_private_counts = false         # private mode only: print GitHub's private contribution counts
@@ -154,7 +171,8 @@ See **[docs/writers.md](docs/writers.md)**.
 | `tools/compare/` | Blind A/B packets comparing two writers, the reviewer's prompt, and the unblinding step that saves `reviews/<date>.md` |
 | `scripts/research_person.py` | Drafts a watch list entry and profile for someone new, for review |
 | `scripts/follow.py`, `scripts/follow_lib.py` | Optional "Who to follow": candidates, mini reports, fit scores and weekly picks |
-| `site/assets/` | The newspaper's CSS and JavaScript |
+| `site/assets/` | The newspaper's CSS and JavaScript, the theme script (`theme.js`), the install card (`pwa.js`) and the app icons |
+| `site/sw.js` | The service worker template; the build fills in the build id and what to keep offline |
 | `worker/` | Optional Cloudflare Worker for private mode; `worker/store.js` keeps a private paper in D1 and R2 |
 | `scripts/store.py` | Pulls a private paper from that storage into a folder and pushes back what changed |
 | `paper/` | The owner's private paper: its Worker config and D1 migrations (its content lives in Cloudflare, not here) |
@@ -166,7 +184,7 @@ See **[docs/writers.md](docs/writers.md)**.
 
 ```sh
 python3 -m unittest discover -s tests -v   # Python tests, including full builds of a synthetic paper
-node --test tests/*.test.mjs               # Worker tests
+node --test tests/*.test.mjs               # Worker, service worker and browser script tests
 ```
 
 Python 3.11 or newer and Node 20 or newer, no dependencies.

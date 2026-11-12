@@ -38,7 +38,10 @@ const SECURITY_HEADERS = {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src https://fonts.gstatic.com",
     "img-src 'self' data: https://avatars.githubusercontent.com https://i.ytimg.com",
-    "connect-src 'self'",
+    // The service worker (sw.js) keeps the Google Fonts files for reading offline.
+    "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com",
+    "worker-src 'self'",
+    "manifest-src 'self'",
     "frame-ancestors 'none'",
     "base-uri 'none'",
     "form-action 'self'",

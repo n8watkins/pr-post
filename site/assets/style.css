@@ -80,7 +80,23 @@ code { font-family: var(--code); font-size: max(.82em, 14px); background: var(--
 .pl-bar span:first-child { background: var(--public); }
 .pl-bar span:last-child { background: var(--private); }
 .person-link[aria-current="page"] .pl-bar span:first-child { background: var(--sheet); }
-.rail-foot { margin-top: auto; font-family: var(--mono); font-size: 13px; color: var(--ink-faint); padding: 0 10px; line-height: 1.5; }
+.rail-end { margin-top: auto; display: grid; gap: 14px; }
+.rail-foot { font-family: var(--mono); font-size: 13px; color: var(--ink-faint); padding: 0 10px; line-height: 1.5; }
+/* Theme: one segmented radio group. The highlight follows <html data-theme>, which
+   theme.js sets before the first paint, so the right segment is lit from the start. */
+.theme-pick { border: 0; margin: 0; padding: 0 4px; min-width: 0; }
+.theme-pick legend { padding: 0 6px; margin-bottom: 6px; font-family: var(--mono); font-size: 14px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-faint); }
+.theme-opts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 3px; border: 1px solid var(--rule); border-radius: 10px; background: var(--sheet); }
+.theme-opts label { position: relative; display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 4px 6px; border-radius: 7px; font-size: 14px; font-weight: 600; color: var(--ink-soft); cursor: pointer; transition: background .15s, color .15s; }
+.theme-opts input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.theme-opts svg { flex: none; }
+@media (hover: hover) { .theme-opts label:hover { background: var(--hover); color: var(--ink); } }
+.theme-opts label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+:root:not([data-theme]) .theme-opts label:has(input[value="system"]),
+:root[data-theme="light"] .theme-opts label:has(input[value="light"]),
+:root[data-theme="dark"] .theme-opts label:has(input[value="dark"]) { background: var(--ink); color: var(--sheet); }
+@media (pointer: coarse) { .theme-opts label { min-height: 44px; } }
+@media (prefers-reduced-motion: reduce) { .theme-opts label { transition: none; } }
 .legend { display: inline-flex; align-items: center; gap: 6px; }
 .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
 .sw.pub { background: var(--public); }
@@ -145,7 +161,14 @@ code { font-family: var(--code); font-size: max(.82em, 14px); background: var(--
 .stories .beat { font-family: var(--mono); font-size: 14px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 4px; }
 .stories .star { color: var(--extra); }
 
-.scores-wrap { overflow-x: auto; }
+/* A soft shadow on whichever side has more table to scroll to, so a cut column reads as "scrolls", not "broken".
+   The sheet-colored covers scroll with the content and hide the shadow once an edge is reached. */
+.scores-wrap { overflow-x: auto;
+  background:
+    linear-gradient(to right, var(--sheet) 30%, transparent) left / 40px 100% no-repeat local,
+    linear-gradient(to left, var(--sheet) 30%, transparent) right / 40px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, color-mix(in srgb, var(--ink) 22%, transparent), transparent) left / 14px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, color-mix(in srgb, var(--ink) 22%, transparent), transparent) right / 14px 100% no-repeat scroll; }
 .scores { width: 100%; border-collapse: collapse; font-size: 17px; min-width: 620px; }
 .scores th { text-align: right; font-family: var(--mono); font-size: 14px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); padding: 8px 10px; border-bottom: 2px solid var(--ink); white-space: nowrap; }
 .scores th:first-child, .scores td:first-child { text-align: left; }
@@ -319,6 +342,12 @@ code { font-family: var(--code); font-size: max(.82em, 14px); background: var(--
   .set-actions { grid-column: 1 / -1; justify-content: flex-start; }
   .add-form { grid-template-columns: minmax(0, 1fr); }
 }
+/* Install card: shown by pwa.js only where the paper can be installed, and never again once dismissed. */
+.install { max-width: 1120px; margin: 22px auto 0; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 14px 16px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 12px; }
+.install img { flex: none; border-radius: 10px; box-shadow: 0 0 0 1px var(--rule); }
+.install-text { flex: 1 1 260px; display: grid; gap: 2px; font-size: 16px; line-height: 1.45; color: var(--ink-soft); }
+.install-text b { color: var(--ink); font-weight: 700; }
+.install-actions { display: flex; gap: 8px; margin-left: auto; }
 footer.colophon { max-width: 1120px; margin: 22px auto 0; font-family: var(--mono); font-size: 13px; color: var(--ink-soft); text-align: center; line-height: 1.6; }
 
 /* ---------- avatars, the record, videos ---------- */

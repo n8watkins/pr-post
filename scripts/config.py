@@ -31,6 +31,7 @@ TICKER_RE = re.compile(r"^[A-Z0-9]{1,6}$")
 
 SITE_DEFAULTS = {
     "title": "The Pull Request Post",
+    "short_name": "",     # the name under the app icon once installed; default "PR Post", or the title when it is changed
     "motto": "All the commits fit to print",
     "url": "",            # public address, e.g. https://you.github.io/pr-post ; used for absolute links in feed.json
     "base_path": "",      # path prefix when served from a sub-folder, e.g. /pr-post (the Pages workflow sets it)
@@ -231,6 +232,7 @@ def parse(text):
     site["base_path"] = base
     for key in ("title", "motto", "desk"):
         site[key] = _text(site[key], f"[site] {key}", 120)
+    site["short_name"] = _text(site["short_name"], "[site] short_name", 30) or ("PR Post" if site["title"] == SITE_DEFAULTS["title"] else site["title"])
     writer = {**WRITER_DEFAULTS, **(raw.get("writer") or {})}
     if writer["kind"] not in ("none", "claude-routine", "gemini"):
         raise ConfigError('[writer] kind must be "none", "claude-routine" or "gemini"')
