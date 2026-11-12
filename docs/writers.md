@@ -11,7 +11,7 @@ pr-post works in two layers.
    Anything an AI writes is labelled with its source on the site and in `feed.json`.
 
 Set `[writer] kind` in `watchlist.toml` to record which writer a paper uses.
-It is documentation for people reading your config: collecting and building never call an AI, and the Gemini writer below runs only when you start it.
+It is documentation for people reading your config: collecting and building never call an AI, and the Gemini writer below runs only when you start it (or, for the owner's paper, its schedule does).
 
 ## What a writer produces
 
@@ -181,6 +181,31 @@ The mapping goes to `.compare/<date>.key.json`, outside the folder the reviewer 
 [tools/compare/REVIEWER.md](../tools/compare/REVIEWER.md) is the reviewer's prompt: missed news, untraceable facts, numbers that do not match the brief, word caps, format, tone and readability, person by person, with concrete suggestions for each writer's instructions.
 After unblinding, suggestions for the Gemini writer go to its prompts and suggestions for the Claude routine to `paper/INSTRUCTIONS.md`, as proposals for the owner.
 
+### Running Gemini on a schedule
+
+On the owner's paper the Gemini writer runs by itself on every issue, right after the Claude routine, so the comparison builds up without anyone starting it.
+The Worker's cron (`worker/jobs.js`, triggers in `paper/wrangler.jsonc`) starts `.github/workflows/paper-gemini.yml` once per issue:
+
+| When (UTC) | What |
+| --- | --- |
+| Wed and Sat 16:45 | Starts it if the Claude routine's edition for the day (`editions/<date>-<kind>.json`) is in; otherwise waits |
+| Wed and Sat 17:30, then 20:30 | The publish backstop, and after it the Gemini writer if it has not started for this issue yet, edition or not |
+
+Each start is recorded as a `gemini` row in the Worker's `requests` table, keyed by the issue (`{"date", "kind"}`), so an issue gets one run, which keeps it on the free tier; a start GitHub refused is not recorded and the next trigger tries again.
+Wednesday is a midweek update and Saturday the weekly, as for the Claude routine.
+
+The job pulls the paper with `JOBS_TOKEN`, runs `python3 -m writers.gemini run --date <date> --kind <kind>` at its default `--rpm 10` (which pushes `gemini/`), and, when Claude's edition for the issue is in, builds the blind packet with `python3 -m tools.compare packet`.
+The packet and its key are stored only in the paper, at `reviews/packets/<date>/packet.md` and `reviews/packets/<date>.key.json` (the same layout as the local `.compare/`), never as a workflow artifact or in the log.
+The public log shows counts only (people, requests, retries, tokens, checks still failing), and the full log goes to the paper's `logs/<run id>-gemini.log`.
+It needs the `GEMINI_API_KEY` repository secret ([paper/SETUP.md](../paper/SETUP.md)).
+
+It fails soft: the publish job and the email are separate workflows, the Worker starts the publish before the Gemini writer in the same trigger and a failure in one never stops the other, and nothing the Gemini job does is published or emailed.
+A red Gemini run means only that this issue has no Gemini side to compare.
+If Claude's edition arrives after the Gemini run started, there is no packet for that issue; build it by hand with the commands above.
+
+**Run workflow** on `Paper: Gemini writer` takes a date (for an older snapshot), a kind and **Dry run**, which counts the requests and estimates the tokens without sending anything.
+The reviewing step (`tools.compare review` and `score`) will hook in after the packet step, where the workflow has a TODO.
+
 #### Comparing writers: two reviewers and points
 
 One gut score per writer is too noisy to compare runs, so every review ends with a `## Scores` section: a fenced JSON block listing, for each writer, every problem found under six metrics, plus a readability grade from 1 to 5 and the gut score out of 10.
@@ -217,7 +242,7 @@ Unblinding the same packet again replaces its own file, while a file there from 
 ### Later: choosing the writer
 
 The plan is to make `[writer] kind` choose who writes the paper that gets published and emailed: `"claude-routine"`, `"gemini"` (its output written to `reports/` and `editions/` instead of `gemini/`) or `"both"` (today's side-by-side setup).
-That switch, and running the Gemini writer from a scheduled workflow, are not built yet; today `kind` is still documentation and the Gemini writer only ever writes `gemini/`.
+That switch is not built yet; today `kind` is still documentation and the Gemini writer only ever writes `gemini/`, even on its schedule.
 
 ## (c) None
 

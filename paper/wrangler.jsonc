@@ -38,7 +38,9 @@
   "services": [{ "binding": "MAILROOM", "service": "mailroom", "entrypoint": "Mailroom", "props": { "app": "prpost" } }],
   "observability": { "enabled": true },
   // The clock for the paper's GitHub Actions jobs (worker/jobs.js): collect on
-  // Wednesdays and Saturdays at 11:00 UTC, publish as a backstop after the
-  // writer's 16:00 run. Add "0 10 * * 6" to start Who to follow on Saturdays.
-  "triggers": { "crons": ["0 11 * * 3,6", "30 17,20 * * 3,6"] }
+  // Wednesdays and Saturdays at 11:00 UTC, the Gemini writer at 16:45 once the
+  // Claude routine's 16:00 run is in, and publish (plus the Gemini writer, if
+  // 16:45 did not start it) as a backstop at 17:30 and 20:30.
+  // Add "0 10 * * 6" to start Who to follow on Saturdays.
+  "triggers": { "crons": ["0 11 * * 3,6", "45 16 * * 3,6", "30 17,20 * * 3,6"] }
 }
