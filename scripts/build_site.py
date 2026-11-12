@@ -14,6 +14,7 @@ from stats/ alone, with no AI involved. No dependencies.
 
 import argparse
 import datetime as dt
+import hashlib
 import html
 import json
 import re
@@ -38,8 +39,14 @@ FACTS_SIDE_MAX = 6  # births and obituaries the facts edition prints before "plu
 REPO_URL = "https://github.com/n8watkins/pr-post"
 MENU_ICON = ('<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">'
              '<path d="M4 7h16M4 12h16M4 17h16"/></svg>')
-FAVICON = ("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2317171a'/%3E"
-           "%3Ctext x='16' y='23' font-family='Georgia,serif' font-weight='900' font-size='20' text-anchor='middle' fill='%23f8f7f3'%3EP%3C/text%3E%3C/svg%3E")
+# The page and app colors per theme, from --sheet and --paper in site/assets/style.css (tests/test_site.py checks they match).
+COLORS = {"light": {"sheet": "#f8f7f3", "paper": "#e9e8e3"}, "dark": {"sheet": "#18181c", "paper": "#0f0f11"}}
+ICONS = "/assets/icons/"
+THEME_ICONS = {
+    "system": '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+    "light": '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    "dark": '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+}
 
 # Set by configure() from [site] in watchlist.toml.
 SITE = dict(config.SITE_DEFAULTS)
@@ -47,6 +54,7 @@ PAPER = SITE["title"]
 BASE = ""
 SHOW_PRIVATE = False
 HAS_FOLLOW = False  # set by build() when there is a "Who to follow" page
+ASSET_V = ""  # set by build(): a hash of site/assets, added to script and stylesheet links so a new publish is fetched fresh
 
 
 def people_api():
@@ -76,6 +84,11 @@ def esc(s):
 def u(path):
     """A site-relative path with the base path in front, for sites served from a sub-folder."""
     return f"{BASE}{path}"
+
+
+def asset(name):
+    """A stylesheet or script under assets/, with the build's asset version so caches never serve an old one."""
+    return u(f"/assets/{name}") + (f"?v={ASSET_V}" if ASSET_V else "")
 
 
 def ext(url, text, cls=""):
@@ -382,9 +395,32 @@ def rail(people, snaps, current=None, page=None):
   <nav class="rail-nav">{nav}</nav>
   <input class="rail-search" id="rail-search" type="search" placeholder="Find a person  ( / )" aria-label="Find a person" autocomplete="off">
   {groups}
-  <div class="rail-foot">
-    {legend} Press [ and ] to move between people.
+  <div class="rail-end">
+    {theme_picker()}
+    <div class="rail-foot">{legend} Press [ and ] to move between people.</div>
   </div>
+</aside>"""
+
+
+def theme_picker():
+    """System, Light and Dark as one radio group; site/assets/theme.js applies and remembers the choice."""
+    options = "".join(
+        f'<label><input type="radio" name="pp-theme" value="{key}"{" checked" if key == "system" else ""}>'
+        f'<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{THEME_ICONS[key]}</svg>'
+        f'<span>{key.title()}</span></label>'
+        for key in ("system", "light", "dark"))
+    return f'<fieldset class="theme-pick"><legend>Theme</legend><div class="theme-opts">{options}</div></fieldset>'
+
+
+def install_card():
+    """The Install card (site/assets/pwa.js shows it): hidden until the browser can install, so nothing moves for anyone else."""
+    short = esc(SITE["short_name"])
+    return f"""<aside class="install" id="install" aria-label="Install {short}" hidden>
+  <img src="{u(ICONS + "icon-192.png")}" alt="" width="44" height="44">
+  <div class="install-text"><b>Read {short} like an app</b>
+    <span data-for="prompt">Install it for a home screen icon and the newest issue offline.</span>
+    <span data-for="ios" hidden>Tap Share, then Add to Home Screen, for an icon and the newest issue offline.</span></div>
+  <div class="install-actions"><button class="btn solid" type="button" data-install data-for="prompt">Install</button><button class="btn" type="button" data-dismiss>Not now</button></div>
 </aside>"""
 
 
@@ -401,11 +437,21 @@ def layout(title, body, people, snaps, current=None, page=None, description=None
 <meta name="description" content="{esc(desc)}">
 <meta property="og:title" content="{esc(title)}">
 <meta property="og:description" content="{esc(desc)}">
-<link rel="icon" href="{FAVICON}">
+<meta name="theme-color" content="{COLORS["light"]["sheet"]}" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="{COLORS["dark"]["sheet"]}" media="(prefers-color-scheme: dark)">
+<script src="{asset("theme.js")}"></script>
+<link rel="manifest" href="{u("/manifest.webmanifest")}" crossorigin="use-credentials">
+<link rel="icon" href="{u(ICONS + "icon.svg")}" type="image/svg+xml">
+<link rel="icon" href="{u(ICONS + "favicon-32.png")}" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="{u(ICONS + "apple-touch-icon.png")}">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="{esc(SITE["short_name"])}">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="alternate" type="application/json" title="{esc(PAPER)} feed" href="{u("/feed.json")}">
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="{FONTS}">
-<link rel="stylesheet" href="{u("/assets/style.css")}">
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="{FONTS}" crossorigin>
+<link rel="stylesheet" href="{asset("style.css")}">
 </head><body>
 <div class="shell">
 {rail(people, snaps, current, page)}
@@ -413,11 +459,12 @@ def layout(title, body, people, snaps, current=None, page=None, description=None
   <header class="topbar"><button id="rail-toggle" type="button" aria-controls="rail" aria-expanded="false">{MENU_ICON}<span class="menu-label">Menu</span></button>{"" if page == "front" else f'<a href="{u("/")}">{esc(PAPER)}</a>'}</header>
   <main class="main">
 {body}
+{install_card()}
 <footer class="colophon">{esc(PAPER)} · built from public GitHub and YouTube activity{private_note} · <a href="{u("/feed.json")}">feed.json</a> · made with <a href="{REPO_URL}">pr-post</a></footer>
   </main>
 </div>
 </div>
-<script src="{u("/assets/app.js")}" defer></script>{"".join(f'<script src="{u("/assets/" + s)}" defer></script>' for s in scripts)}
+<script src="{asset("app.js")}" defer></script><script src="{asset("pwa.js")}" defer></script>{"".join(f'<script src="{asset(s)}" defer></script>' for s in scripts)}
 </body></html>
 """
 
@@ -973,6 +1020,8 @@ def build(paper, out):
     if out.exists():
         shutil.rmtree(out)
     shutil.copytree(ROOT / "site" / "assets", out / "assets")
+    global ASSET_V
+    ASSET_V = tree_hash(out / "assets")[:10]
 
     def write(path, text):
         f = out / path
@@ -1010,7 +1059,8 @@ def build(paper, out):
         for stem, md in reports[p["id"]]:
             write(f"p/{p['id']}/{stem}/index.html", layout(f"{report_title(md, stem)} · {PAPER}", sheet(report_page(p, stem, md)), order, snaps, current=p["id"]))
 
-    for stem, items in issues_of(order, reports).items():
+    issues = issues_of(order, reports)
+    for stem, items in issues.items():
         title = f"{digest.KIND_NAMES[digest.kind_of(stem)]}, {day_short(stem[:10])} · {PAPER}"
         write(f"r/{stem}/index.html", layout(title, sheet(issue_page(stem, items, digest.load_edition(paper, stem))), order, snaps, page="archive",
                                             description=f"Every report from the {day_long(stem[:10])} issue of {PAPER}."))
@@ -1025,6 +1075,10 @@ def build(paper, out):
         write("people/index.html", layout(f"People · {PAPER}", sheet(people_page()), order, snaps, page="people"))
     elif SITE["mode"] == "private":
         write("settings/index.html", layout(f"People and settings · {PAPER}", sheet(settings_page(people)), order, snaps, page="settings"))
+    write("offline.html", layout(f"Offline · {PAPER}", sheet(
+        '<h1 class="page-hed">You are offline</h1><p class="page-sub">This page is not saved on this device, '
+        'but the newest issue is. Open the front page, or reconnect and try again.</p>'
+        f'<p><a class="btn solid" href="{u("/")}">Open the front page</a></p>'), order, snaps))
     write("404.html", layout(f"Not found · {PAPER}", sheet(f'<h1 class="page-hed">Page not found</h1><p class="page-sub">That page is not in this paper.</p><p><a class="btn solid" href="{u("/")}">Back to the front page</a></p>'), order, snaps))
 
     feed = None
@@ -1033,9 +1087,64 @@ def build(paper, out):
         write("feed.json", json.dumps(feed, indent=1, ensure_ascii=False) + "\n")
     if SITE["mode"] == "public":
         write(".nojekyll", "")
+    write("manifest.webmanifest", json.dumps(manifest(), indent=1, ensure_ascii=False) + "\n")
+    newest_issue = next(iter(issues), None)
+    pages = ["./", "archive/"] + [f"p/{p['id']}/" for p in order]
+    pages += [f"r/{newest_issue}/"] if newest_issue else []
+    pages += [f"e/{editions[-1]['stem']}/"] if editions else []
+    pages += ["follow/", "follow/picks/"] if HAS_FOLLOW else []
+    write("sw.js", service_worker(out, pages))
     count = sum(1 for _ in out.rglob("*.html"))
     print(f"Built {count} pages{' and feed.json' if feed else ''} into {out}")
     return feed
+
+
+def tree_hash(folder):
+    """A hash of every file under `folder`, names and bytes, in a fixed order."""
+    h = hashlib.sha256()
+    for f in sorted(p for p in folder.rglob("*") if p.is_file()):
+        h.update(f.relative_to(folder).as_posix().encode() + b"\0" + f.read_bytes() + b"\0")
+    return h.hexdigest()
+
+
+def manifest():
+    """The web app manifest: what a phone or computer needs to install the paper as an app."""
+    start = u("/")
+    icon = lambda name, size, purpose: {"src": u(ICONS + name), "sizes": f"{size}x{size}", "type": "image/png", "purpose": purpose}
+    return {
+        "id": start,
+        "name": PAPER,
+        "short_name": SITE["short_name"],
+        "description": "What the builders you follow shipped this week, from their public GitHub and YouTube work.",
+        "start_url": start,
+        "scope": start,
+        "display": "standalone",
+        "orientation": "any",
+        "lang": "en",
+        "dir": "ltr",
+        "categories": ["news", "productivity"],
+        "theme_color": COLORS["light"]["sheet"],
+        "background_color": COLORS["light"]["paper"],
+        # Chrome's dark-mode override for the splash and title bar; other browsers ignore it.
+        "user_preferences": {"color_scheme_dark": {"theme_color": COLORS["dark"]["sheet"], "background_color": COLORS["dark"]["paper"]}},
+        "icons": [icon("icon-192.png", 192, "any"), icon("icon-512.png", 512, "any"), icon("maskable-512.png", 512, "maskable")],
+    }
+
+
+def service_worker(out, pages):
+    """site/sw.js with this build's id and the files to keep offline, all relative to the scope.
+
+    The build id hashes everything else that was built, so an unchanged rebuild keeps the
+    browser's cache and any change to a page, asset or feed starts a fresh one.
+    """
+    shell = sorted(f"assets/{f.relative_to(out / 'assets').as_posix()}" + (f"?v={ASSET_V}" if f.suffix in (".css", ".js") else "")
+                   for f in (out / "assets").rglob("*") if f.is_file()) + ["manifest.webmanifest"]
+    js = lambda v: json.dumps(v, ensure_ascii=False)
+    return ((ROOT / "site" / "sw.js").read_text()
+            .replace("__BUILD__", tree_hash(out)[:16])
+            .replace("__SHELL__", js(shell))
+            .replace("__PAGES__", js(pages))
+            .replace("__FONT_CSS__", js(FONTS)))
 
 
 def main():

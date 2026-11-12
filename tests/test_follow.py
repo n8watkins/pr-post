@@ -259,7 +259,7 @@ class Output(unittest.TestCase):
         self.assertNotIn("data-draft=", page)
         self.assertIn("Open GitHub profile", page)
         self.assertIn('href="/follow/picks/"', page)
-        self.assertIn('<script src="/assets/follow.js" defer></script>', page)
+        self.assertRegex(page, r'<script src="/assets/follow\.js\?v=[0-9a-f]{10}" defer></script>')
         picks = (out / "follow" / "picks" / "index.html").read_text()
         data = json.loads(re.search(r'<script type="application/json" id="picks-data">(.*?)</script>', picks, re.S).group(1))
         self.assertEqual([c["login"] for c in data["cards"]], ["jane"])

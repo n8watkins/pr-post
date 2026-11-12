@@ -241,6 +241,28 @@ A request on these paths with no token gets the Worker's own 403, and one with a
 - [ ] Delete the temporary password: `npx wrangler@4.151.3 secret delete SITE_PASSWORD -c paper/wrangler.jsonc`.
   It asks you to confirm.
 
+### On your phone
+
+The paper installs as an app from the browser, behind the same sign-in.
+Sign in once in the browser first, then:
+
+- [ ] **iPhone or iPad:** in Safari, tap **Share**, **Add to Home Screen**, **Add**.
+  The installed app keeps its own sign-in, apart from Safari's, so it asks for the email code once the first time you open it.
+- [ ] **Android:** in Chrome, tap **Install** on the card at the bottom of the page, or **⋮**, **Add to Home screen** (**Install app**).
+- [ ] Open the app, then turn on airplane mode and open it again: the front page and everyone's pages still open, and a page that was never saved shows "You are offline".
+
+How it works with Access:
+
+- The manifest is fetched with your sign-in cookie (`crossorigin="use-credentials"`), so Access lets it through without a bypass.
+- The service worker answers only pages, `assets/` and the manifest.
+  It never answers `/api/`, `/act/`, `/files/`, `/cdn-cgi/` or anything that is not a GET, and it never caches a redirect, an opaque answer or anything from `cloudflareaccess.com`.
+- When your session runs out, a page load is redirected to Access as usual, even for a page the app has saved, so you sign in again and land back where you were.
+  Only when the network is down does the app show its saved copy.
+- **Session duration** decides how often the app asks for a code; for an installed app on a phone, a month is comfortable.
+- Each publish has a new build id, so the app drops the old copies and keeps the new issue the next time it opens online.
+- The saved pages stay on the device until then, readable offline by whoever holds the unlocked phone; signing out of Access does not remove them.
+  To clear them, remove the app (or, in a browser, clear the site's data).
+
 ### Other Workers on the same storage
 
 Any other Worker bound to the same D1 database and R2 bucket, such as a test copy, can read the whole paper.
@@ -309,6 +331,9 @@ A public paper has no D1, R2, Worker, Access, email or People page; the watch li
 | gitleaks flags `ACCESS_AUD` in a pull request | Add `// gitleaks:allow` at the end of that line, in the commit that adds the value; a fix in a later commit does not clear the earlier one. |
 | `wrangler secret delete --force` fails | There is no `--force` flag; the command asks for confirmation. Run it in a terminal and answer the prompt. |
 | Zero Trust asks for a payment method | Stop, go back and choose the Free plan. |
+| The phone app shows a blank or generic icon, or Chrome offers no Install | The manifest or icons came back as the Access login page. Open `/manifest.webmanifest` in the signed-in browser: it must be JSON. If the phone still fails, add `/manifest.webmanifest` and `/assets/icons/` to the bypass application; they hold only the paper's name and its icon. |
+| The installed app keeps asking for the email code | Each installed app has its own sign-in, apart from the browser. Lengthen the **Session duration** on the Worker's Access policy. |
+| The app shows an old issue | It was offline, so it showed its saved copy. Close the app and open it again once online; a new publish replaces the saved copies. |
 
 Rollback: the Worker keeps its earlier versions, `npx wrangler@4.151.3 rollback <version id> -c paper/wrangler.jsonc`.
 A full local copy of the paper is one `python3 scripts/store.py pull <folder>` away, with `JOBS_TOKEN`.

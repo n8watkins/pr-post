@@ -194,6 +194,17 @@ test("the site is served from R2 after sign-in, like static assets", async () =>
   const missing = await call(env, "/p/nobody/", { basic: true });
   assert.equal(missing.status, 404);
   assert.equal(await missing.text(), "lost");
+  // The installable app: the manifest, the service worker and its icons, with a CSP that lets them work.
+  await site("manifest.webmanifest", "{}");
+  await site("sw.js", "self;");
+  await site("assets/icons/icon-192.png", "png");
+  assert.equal((await call(env, "/manifest.webmanifest", { basic: true })).headers.get("Content-Type"), "application/manifest+json");
+  assert.equal((await call(env, "/sw.js", { basic: true })).headers.get("Content-Type"), "text/javascript; charset=utf-8");
+  assert.equal((await call(env, "/assets/icons/icon-192.png?v=1", { basic: true })).headers.get("Content-Type"), "image/png");
+  const csp = Object.fromEntries(front.headers.get("Content-Security-Policy").split("; ").map((d) => [d.split(" ")[0], d]));
+  assert.equal(csp["worker-src"], "worker-src 'self'");
+  assert.equal(csp["manifest-src"], "manifest-src 'self'");
+  assert.equal(csp["connect-src"], "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com");
   const etag = front.headers.get("ETag");
   assert.equal((await call(env, "/", { basic: true, headers: { "If-None-Match": etag } })).status, 304);
   assert.equal((await call(env, "/api/site/files/index.html", { token: JOBS, method: "DELETE" })).status, 200);
